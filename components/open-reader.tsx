@@ -20,14 +20,54 @@ const empty: ReadingScore = { total: 0, accuracy: 0, fluency: 0, completion: 0, 
 
 export default function OpenReader({ passages }: Props) {
   const [language, setLanguage] = useState<Language>("hi"); const [index, setIndex] = useState(0); const [status, setStatus] = useState<Status>("ready"); const [transcript, setTranscript] = useState(""); const [interim, setInterim] = useState(""); const [seconds, setSeconds] = useState(0); const [attempts, setAttempts] = useState(0); const [score, setScore] = useState<ReadingScore>(empty); const [level, setLevel] = useState(0); const [error, setError] = useState(""); const [samplePlaying, setSamplePlaying] = useState(false); const [isSaving, setIsSaving] = useState(false); const [details, setDetails] = useState<Details>({ name: "", age: "", phone: "", email: "", place: "", consent: false }); const [errors, setErrors] = useState<Partial<Record<keyof Details, string>>>({});
-  const recognition = useRef<SpeechRecognition | null>(null); const stream = useRef<MediaStream | null>(null); const audioContext = useRef<AudioContext | null>(null); const meterLastUpdated = useRef(0); const startTime = useRef(0); const resultText = useRef(""); const finalDuration = useRef(0); const keepListening = useRef(false); const frame = useRef<number | null>(null); const passage = passages[index]; const t = words[language]; const reading = status === "reading";
+  const recognition = useRef<SpeechRecognition | null>(null); const startTime = useRef(0); const resultText = useRef(""); const finalDuration = useRef(0); const keepListening = useRef(false); const passage = passages[index]; const t = words[language]; const reading = status === "reading";
   useEffect(() => { if (!reading) return; const timer = window.setInterval(() => setSeconds(Math.floor((Date.now() - startTime.current) / 1000)), 1000); return () => window.clearInterval(timer); }, [reading]);
   useEffect(() => { if (!reading || !recognition.current) return; const speech = recognition.current; speech.onend = () => { if (keepListening.current) setError("Voice recognition paused. Finish this attempt or start a new one."); }; }, [reading]);
   useEffect(() => () => { stopMeter(); window.speechSynthesis?.cancel(); }, []);
   const elapsed = `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
-  function stopMeter() { if (frame.current) cancelAnimationFrame(frame.current); frame.current = null; stream.current?.getTracks().forEach((track) => track.stop()); stream.current = null; if (audioContext.current) { void audioContext.current.close(); audioContext.current = null; } setLevel(0); }
-  function startMeter(input: MediaStream) { const audio = new AudioContext(); audioContext.current = audio; const analyser = audio.createAnalyser(); analyser.fftSize = 32; audio.createMediaStreamSource(input).connect(analyser); const values = new Uint8Array(analyser.frequencyBinCount); const draw = (now: number) => { analyser.getByteFrequencyData(values); if (now - meterLastUpdated.current > 100) { meterLastUpdated.current = now; setLevel(values.reduce((total, value) => total + value, 0) / values.length); } frame.current = requestAnimationFrame(draw); }; frame.current = requestAnimationFrame(draw); }
-  async function startReading() { setError(""); const API = window.SpeechRecognition || window.webkitSpeechRecognition; if (!API) { setStatus("unsupported"); return; } try { const input = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } }); stream.current = input; startMeter(input); setTranscript(""); setInterim(""); resultText.current = ""; setSeconds(0); startTime.current = Date.now(); setAttempts((value) => value + 1); keepListening.current = true; const speech = new API(); recognition.current = speech; speech.lang = "hi-IN"; speech.continuous = true; speech.interimResults = true; speech.onresult = (event) => { let final = ""; let partial = ""; for (let item = event.resultIndex; item < event.results.length; item += 1) { if (event.results[item].isFinal) final += `${event.results[item][0].transcript} `; else partial += event.results[item][0].transcript; } if (final) { resultText.current += final; setTranscript(resultText.current); } setInterim(partial); }; speech.onerror = () => setError(language === "hi" ? "Mic या voice recognition में रुकावट आई। फिर कोशिश करें।" : "Microphone or speech recognition was interrupted. Please try again."); speech.onend = () => { if (keepListening.current) try { speech.start(); } catch { /* browser restart */ } }; speech.start(); setStatus("reading"); } catch { setError(language === "hi" ? "माइक्रोफ़ोन की अनुमति दें और फिर शुरू करें।" : "Allow microphone access and try again."); } }
+  function stopMeter() { setLevel(0); }
+  async function startReading() {
+    setError("");
+    const API = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!API) { setStatus("unsupported"); return; }
+    try {
+      keepListening.current = false;
+      recognition.current?.stop();
+      stopMeter();
+      setTranscript("");
+      setInterim("");
+      resultText.current = "";
+      setSeconds(0);
+      startTime.current = Date.now();
+      setAttempts((value) => value + 1);
+      const speech = new API();
+      recognition.current = speech;
+      speech.lang = "hi-IN";
+      speech.continuous = true;
+      speech.interimResults = true;
+      speech.onresult = (event) => {
+        let final = "";
+        let partial = "";
+        for (let item = event.resultIndex; item < event.results.length; item += 1) {
+          if (event.results[item].isFinal) final += `${event.results[item][0].transcript} `;
+          else partial += event.results[item][0].transcript;
+        }
+        if (final) { resultText.current += final; setTranscript(resultText.current); }
+        setInterim(partial);
+      };
+      speech.onerror = () => setError(language === "hi" ? "माइक्रोफ़ोन या voice recognition में रुकावट आई। फिर कोशिश करें।" : "Microphone or speech recognition was interrupted. Please try again.");
+      speech.onend = () => {
+        if (keepListening.current) setError(language === "hi" ? "Voice recognition रुक गया है। Finish दबाएँ या फिर से शुरू करें।" : "Voice recognition paused. Finish this attempt or start a new one.");
+      };
+      keepListening.current = true;
+      setStatus("reading");
+      speech.start();
+    } catch {
+      keepListening.current = false;
+      setStatus("ready");
+      setError(language === "hi" ? "माइक्रोफ़ोन की अनुमति दें और फिर शुरू करें।" : "Allow microphone access and try again.");
+    }
+  }
   function finishReading() { keepListening.current = false; recognition.current?.stop(); stopMeter(); const duration = Math.max(1, Math.floor((Date.now() - startTime.current) / 1000)); finalDuration.current = duration; setSeconds(duration); setScore(scoreReading(passage.reference_text, resultText.current, duration, attempts)); setStatus("details"); }
   function nextPassage() { setIndex((value) => (value + 1) % passages.length); setStatus("ready"); setTranscript(""); setInterim(""); setSeconds(0); setScore(empty); }
   function listen() { const synth = window.speechSynthesis; if (!synth) { setError(t.voiceError); return; } if (samplePlaying) { synth.cancel(); setSamplePlaying(false); return; } synth.cancel(); const voice = new SpeechSynthesisUtterance(passage.reference_text); voice.lang = "hi-IN"; voice.rate = .8; voice.onend = () => setSamplePlaying(false); voice.onerror = () => { setSamplePlaying(false); setError(t.voiceError); }; synth.speak(voice); setSamplePlaying(true); }
