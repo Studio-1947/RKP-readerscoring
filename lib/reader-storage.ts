@@ -15,6 +15,7 @@ type SaveAttemptInput = {
   transcript: string;
   durationSeconds: number;
   score: ReadingScore;
+  scoringSource?: "browser" | "server";
 };
 
 async function getAnonymousReaderId() {
@@ -30,7 +31,7 @@ async function getAnonymousReaderId() {
 
 export async function saveReaderAttempt(input: SaveAttemptInput) {
   const { supabase, userId } = await getAnonymousReaderId();
-  const { details, passage, transcript, durationSeconds, score } = input;
+  const { details, passage, transcript, durationSeconds, score, scoringSource = "server" } = input;
 
   const { error: profileError } = await supabase.from("reader_profiles").upsert({
     id: userId,
@@ -55,7 +56,7 @@ export async function saveReaderAttempt(input: SaveAttemptInput) {
     completion: score.completion,
     words_per_minute: score.wordsPerMinute,
     total_score: score.total,
-    scoring_source: "browser",
+    scoring_source: scoringSource,
   });
   if (attemptError) throw attemptError;
 }
