@@ -25,6 +25,7 @@ interface SpeechRecognition {
   onend: (() => void) | null;
   start(): void;
   stop(): void;
+  abort(): void;
 }
 
 interface Window {

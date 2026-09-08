@@ -20,10 +20,10 @@ const copy = {
     profileTag: "स्कोर देखने से पहले", profileTitle: "अपनी जानकारी भरें", profileHelp: "अपना परिणाम देखने के लिए ये छोटे विवरण भरें।",
     name: "पूरा नाम", age: "आयु", phone: "फ़ोन नंबर", email: "ईमेल (वैकल्पिक)", place: "शहर / स्थान",
     consent: "मैं सहमत हूँ कि राजकमल मेरे स्कोर के लिए ये विवरण इस्तेमाल कर सकता है।",
-    privacy: "रिकॉर्डिंग केवल transcription के लिए भेजी जाती है और इस ऐप में सहेजी नहीं जाती। आपकी सहमति के बाद केवल प्रोफ़ाइल और स्कोर सहेजे जाते हैं।",
+    privacy: "आपका browser आवाज़ को अपनी speech सेवा पर भेज सकता है। यह ऐप सहमति के बाद आपके विवरण, पहचाना गया पाठ और स्कोर सहेजता है।",
     view: "मेरा स्कोर देखें", saving: "सहेजा जा रहा है…", result: "आपका परिणाम", great: "बहुत सुंदर पाठ!", score: "कुल स्कोर",
     accuracy: "शुद्धता", fluency: "प्रवाह", completion: "पूर्णता", speed: "गति", retry: "फिर पढ़ें", share: "परिणाम शेयर करें",
-    unsupported: "इस browser में सुरक्षित audio recording उपलब्ध नहीं है। Chrome, Edge या Safari का नया संस्करण इस्तेमाल करें।",
+    unsupported: "इस browser में आवाज़ पहचान उपलब्ध नहीं है। इंटरनेट के साथ Chrome या Edge पर कोशिश करें।",
     recordingError: "माइक्रोफ़ोन की अनुमति दें और फिर कोशिश करें।", processingError: "रिकॉर्डिंग को पढ़ा नहीं जा सका। फिर से कोशिश करें।",
     voiceError: "Hindi आवाज़ उपलब्ध नहीं है। अपनी device voice settings जाँचें।", missing: "यह जानकारी भरें।",
     ageError: "5 से 120 के बीच आयु भरें।", phoneError: "मान्य फ़ोन नंबर भरें।", emailError: "मान्य ईमेल भरें।", copied: "परिणाम कॉपी हो गया है।",
@@ -35,10 +35,10 @@ const copy = {
     profileTag: "BEFORE YOU VIEW YOUR SCORE", profileTitle: "Tell us about yourself", profileHelp: "Complete these short details to view your result.",
     name: "Full name", age: "Age", phone: "Phone number", email: "Email (optional)", place: "City / place",
     consent: "I agree that Rajkamal may use these details for my score.",
-    privacy: "Your recording is sent only for transcription and is not stored by this app. Your profile and score are saved only after consent.",
+    privacy: "Your browser may send audio to its speech service. This app saves your details, recognized text and score after consent.",
     view: "View my score", saving: "Saving…", result: "YOUR RESULT", great: "A beautiful reading!", score: "TOTAL SCORE",
     accuracy: "Accuracy", fluency: "Fluency", completion: "Completion", speed: "Speed", retry: "Read again", share: "Share result",
-    unsupported: "Secure audio recording is unavailable in this browser. Use a recent version of Chrome, Edge, or Safari.",
+    unsupported: "Speech recognition is unavailable in this browser. Try Chrome or Edge with an internet connection.",
     recordingError: "Allow microphone access and try again.", processingError: "We could not process this recording. Please try again.",
     voiceError: "A Hindi voice is unavailable. Check your device voice settings.", missing: "Complete this field.",
     ageError: "Enter an age from 5 to 120.", phoneError: "Enter a valid phone number.", emailError: "Enter a valid email.", copied: "Your result is copied and ready to share.",
@@ -59,9 +59,9 @@ export default function OpenReader({ passages }: Props) {
   const [isSaving, setIsSaving] = useState(false);
   const [details, setDetails] = useState<Details>({ name: "", age: "", phone: "", email: "", place: "", consent: false });
   const [errors, setErrors] = useState<Partial<Record<keyof Details, string>>>({});
-  const recorder = useRef<MediaRecorder | null>(null);
-  const stream = useRef<MediaStream | null>(null);
-  const chunks = useRef<Blob[]>([]);
+  const recognition = useRef<SpeechRecognition | null>(null);
+  const completedText = useRef("");
+  const stoppedAt = useRef(0);
   const startedAt = useRef(0);
   const attempts = useRef(0);
 
@@ -78,21 +78,16 @@ export default function OpenReader({ passages }: Props) {
   }, [recording]);
 
   useEffect(() => () => {
-    // Unmounting after a rendering error must release the mic without uploading.
-    if (recorder.current) {
-      recorder.current.onstop = null;
-      recorder.current.ondataavailable = null;
-      recorder.current.onerror = null;
-      if (recorder.current.state !== "inactive") recorder.current.stop();
+    const active = recognition.current;
+    recognition.current = null;
+    if (active) {
+      active.onresult = null;
+      active.onerror = null;
+      active.onend = null;
+      active.abort();
     }
-    stream.current?.getTracks().forEach((track) => track.stop());
     window.speechSynthesis?.cancel();
   }, []);
-
-  function stopTracks() {
-    stream.current?.getTracks().forEach((track) => track.stop());
-    stream.current = null;
-  }
 
   function resetAttempt() {
     setStatus("ready"); setSeconds(0); setTranscript(""); setScore(emptyScore); setError(""); setErrors({});
@@ -104,60 +99,85 @@ export default function OpenReader({ passages }: Props) {
     resetAttempt();
   }
 
-  async function startRecording() {
+  function startRecording() {
+    if (recognition.current) return;
     setError("");
-    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
-      setStatus("unsupported");
-      return;
-    }
+    const API = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!API) { setStatus("unsupported"); return; }
+
+    window.speechSynthesis?.cancel();
+    setSamplePlaying(false);
+    const active = new API();
+    recognition.current = active;
+    completedText.current = "";
+    stoppedAt.current = 0;
+    startedAt.current = Date.now();
+    attempts.current += 1;
+    setTranscript("");
+    setSeconds(0);
+    active.lang = "hi-IN";
+    active.continuous = true;
+    active.interimResults = true;
+    let failed = false;
+
+    active.onresult = (event) => {
+      if (recognition.current !== active) return;
+      let final = "";
+      let interim = "";
+      // Rebuild from the session results, so repeated events cannot duplicate words.
+      for (let i = 0; i < event.results.length; i += 1) {
+        const result = event.results[i];
+        if (result.isFinal) final += result[0].transcript + " ";
+        else interim += result[0].transcript + " ";
+      }
+      completedText.current = final.trim();
+      setTranscript((final + interim).trim());
+    };
+    active.onerror = (event) => {
+      if (recognition.current !== active) return;
+      failed = true;
+      setError(event.error === "not-allowed" || event.error === "audio-capture"
+        ? t.recordingError
+        : language === "hi"
+          ? "आवाज़ पहचानी नहीं जा सकी। इंटरनेट जाँचें और फिर कोशिश करें।"
+          : "Speech recognition failed. Check your internet connection and try again.");
+      recognition.current = null;
+      active.abort();
+      setStatus("ready");
+    };
+    active.onend = () => {
+      if (recognition.current !== active) return;
+      recognition.current = null;
+      if (failed) return;
+      const duration = Math.max(1, Math.floor(((stoppedAt.current || Date.now()) - startedAt.current) / 1000));
+      setSeconds(duration);
+      if (!completedText.current) {
+        setError(language === "hi" ? "कोई आवाज़ पहचानी नहीं गई। फिर पढ़ें।" : "No speech was recognized. Please read again.");
+        setStatus("ready");
+        return;
+      }
+      setTranscript(completedText.current);
+      setScore(scoreReading(passage.reference_text, completedText.current, duration, attempts.current));
+      setStatus("details");
+    };
     try {
-      stopTracks();
-      const audioStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
-      stream.current = audioStream;
-      const mimeType = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"].find((mime) => MediaRecorder.isTypeSupported(mime));
-      const activeRecorder = new MediaRecorder(audioStream, mimeType ? { mimeType } : undefined);
-      recorder.current = activeRecorder;
-      chunks.current = [];
-      attempts.current += 1;
-      startedAt.current = Date.now();
-      setSeconds(0); setTranscript(""); setStatus("recording");
-      activeRecorder.ondataavailable = (event) => { if (event.data.size > 0) chunks.current.push(event.data); };
-      activeRecorder.onerror = () => { stopTracks(); setStatus("ready"); setError(t.recordingError); };
-      activeRecorder.onstop = () => {
-        const audio = new Blob(chunks.current, { type: activeRecorder.mimeType || "audio/webm" });
-        stopTracks();
-        void transcribe(audio);
-      };
-      activeRecorder.start(1000);
+      active.start();
+      setStatus("recording");
     } catch {
-      stopTracks(); setStatus("ready"); setError(t.recordingError);
+      recognition.current = null;
+      active.abort();
+      setStatus("ready");
+      setError(t.recordingError);
     }
   }
 
   function finishRecording() {
-    if (!recorder.current || recorder.current.state === "inactive") return;
+    const active = recognition.current;
+    if (!active || stoppedAt.current) return;
+    stoppedAt.current = Date.now();
     setStatus("transcribing");
-    recorder.current.stop();
-  }
-
-  async function transcribe(audio: Blob) {
-    if (!audio.size) { setStatus("ready"); setError(t.processingError); return; }
-    try {
-      const form = new FormData();
-      form.append("audio", new File([audio], "reading.webm", { type: audio.type || "audio/webm" }));
-      form.append("reference", passage.reference_text);
-      const response = await fetch("/api/transcribe", { method: "POST", body: form });
-      const payload = await response.json() as { transcript?: string; error?: string };
-      if (!response.ok || !payload.transcript) throw new Error(payload.error || t.processingError);
-      const duration = Math.max(1, Math.floor((Date.now() - startedAt.current) / 1000));
-      setSeconds(duration);
-      setTranscript(payload.transcript);
-      setScore(scoreReading(passage.reference_text, payload.transcript, duration, attempts.current));
-      setStatus("details");
-    } catch (caught) {
-      setStatus("ready");
-      setError(caught instanceof Error && caught.message ? caught.message : t.processingError);
-    }
+    // Wait for the final result and end event before scoring.
+    active.stop();
   }
 
   function listen() {
@@ -186,7 +206,7 @@ export default function OpenReader({ passages }: Props) {
     if (Object.keys(next).length) return;
     setIsSaving(true); setError("");
     try {
-      await saveReaderAttempt({ details, passage, transcript, durationSeconds: seconds, score, scoringSource: "server" });
+      await saveReaderAttempt({ details, passage, transcript, durationSeconds: seconds, score, scoringSource: "browser" });
       setStatus("result");
     } catch {
       setError(language === "hi" ? "आपके विवरण save नहीं हो पाए। Supabase setup और internet connection जाँचें।" : "We could not save your result. Check the Supabase setup and internet connection.");
@@ -216,6 +236,7 @@ export default function OpenReader({ passages }: Props) {
       </article>
       <section className={`mt-5 rounded-[1.6rem] border p-5 sm:p-6 ${busy ? "border-[#b42332]/40 bg-[#7e1421] text-white" : "border-stone-200 bg-white"}`}>
         <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between"><div className="flex items-center gap-4"><div className={`grid size-14 place-items-center rounded-full ${busy ? "bg-white/15" : "bg-[#fdf0ef] text-[#b42332]"}`}>{recording ? <Mic className="size-6" /> : <MicOff className="size-6" />}</div><div><p className={`text-sm font-bold ${busy ? "text-[#ffe8a7]" : "text-[#b42332]"}`}>{statusTitle}</p><p className={`mt-1 text-xs ${busy ? "text-white/70" : "text-stone-500"}`}>{statusHelp}</p></div></div><div className="flex items-center justify-between gap-4 sm:justify-end"><span className="flex items-center gap-2 font-mono text-xl font-bold"><Timer className="size-4" />{elapsed}</span>{recording ? <button onClick={finishRecording} className="rounded-full bg-[#e5b043] px-5 py-3 text-sm font-bold text-[#352311]">{t.finish}</button> : <button onClick={startRecording} disabled={status === "transcribing"} className="flex items-center gap-2 rounded-full bg-[#b42332] px-5 py-3 text-sm font-bold text-white hover:bg-[#7e1421] disabled:cursor-wait disabled:opacity-60"><Play className="size-4 fill-current" />{t.start}</button>}</div></div>
+        {recording && transcript && <p className="mt-4 text-sm" translate="no">{transcript}</p>}
         {recording && <div className="mt-5 flex h-9 items-center justify-center gap-1.5">{Array.from({ length: 22 }).map((_, item) => <span key={item} className="audio-bar w-1 rounded-full bg-[#e5b043]" style={{ height: `${20 + ((item * 23) % 65)}%` }} />)}</div>}
         {error && <p className={`mt-4 flex items-center gap-2 text-xs font-medium ${busy ? "text-[#ffe8a7]" : "text-[#b42332]"}`}><Info className="size-4" />{error}</p>}
       </section>

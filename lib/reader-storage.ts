@@ -21,7 +21,7 @@ type SaveAttemptInput = {
 async function getAnonymousReaderId() {
   const supabase = createClient();
   const { data: currentUser, error: currentUserError } = await supabase.auth.getUser();
-  if (currentUserError) throw currentUserError;
+  if (currentUserError && currentUserError.name !== "AuthSessionMissingError") throw currentUserError;
   if (currentUser.user) return { supabase, userId: currentUser.user.id };
 
   const { data, error } = await supabase.auth.signInAnonymously();
@@ -31,7 +31,7 @@ async function getAnonymousReaderId() {
 
 export async function saveReaderAttempt(input: SaveAttemptInput) {
   const { supabase, userId } = await getAnonymousReaderId();
-  const { details, passage, transcript, durationSeconds, score, scoringSource = "server" } = input;
+  const { details, passage, transcript, durationSeconds, score, scoringSource = "browser" } = input;
 
   const { error: profileError } = await supabase.from("reader_profiles").upsert({
     id: userId,
