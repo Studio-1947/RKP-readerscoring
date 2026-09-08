@@ -21,11 +21,19 @@ body {
 
 .paper-grain {
   background-color: #f8f4ed;
-  background-image: radial-gradient(rgba(92, 63, 38, .09) .6px, transparent .6px);
-  background-size: 8px 8px;
 }
 
 .audio-bar { animation: pulse-bar 850ms ease-in-out infinite alternate; transform-origin: center; }
 .audio-bar:nth-child(2n) { animation-delay: 120ms; }
 .audio-bar:nth-child(3n) { animation-delay: 240ms; }
 @keyframes pulse-bar { from { transform: scaleY(.35); } to { transform: scaleY(1); } }
+
+button { min-height: 44px; }
+input { font-size: 16px; }
+main { overflow-wrap: anywhere; }
+@media (max-width: 400px) {
+  header button { padding-inline: 10px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .audio-bar { animation: none; }
+}

@@ -7,6 +7,7 @@ export type ReaderDetails = {
   phone: string;
   email: string;
   place: string;
+  leaderboardOptIn?: boolean;
 };
 
 type SaveAttemptInput = {
@@ -41,6 +42,7 @@ export async function saveReaderAttempt(input: SaveAttemptInput) {
     email: details.email.trim() || null,
     place: details.place.trim(),
     consented_at: new Date().toISOString(),
+    leaderboard_opt_in: details.leaderboardOptIn === true,
   });
   if (profileError) throw profileError;
 
