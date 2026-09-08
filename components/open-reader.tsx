@@ -78,7 +78,13 @@ export default function OpenReader({ passages }: Props) {
   }, [recording]);
 
   useEffect(() => () => {
-    if (recorder.current?.state === "recording") recorder.current.stop();
+    // Unmounting after a rendering error must release the mic without uploading.
+    if (recorder.current) {
+      recorder.current.onstop = null;
+      recorder.current.ondataavailable = null;
+      recorder.current.onerror = null;
+      if (recorder.current.state !== "inactive") recorder.current.stop();
+    }
     stream.current?.getTracks().forEach((track) => track.stop());
     window.speechSynthesis?.cancel();
   }, []);
