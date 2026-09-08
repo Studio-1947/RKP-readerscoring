@@ -1,0 +1,31 @@
+@import "tailwindcss";
+
+:root {
+  --ink: #221d1b;
+  --paper: #f8f4ed;
+  --raj-red: #b42332;
+  --raj-dark: #7e1421;
+  --mustard: #e5b043;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  color: var(--ink);
+  background: var(--paper);
+  font-family: Arial, "Noto Sans Devanagari", "Nirmala UI", sans-serif;
+}
+
+.serif { font-family: Georgia, "Noto Serif Devanagari", "Nirmala UI", serif; }
+
+.paper-grain {
+  background-color: #f8f4ed;
+  background-image: radial-gradient(rgba(92, 63, 38, .09) .6px, transparent .6px);
+  background-size: 8px 8px;
+}
+
+.audio-bar { animation: pulse-bar 850ms ease-in-out infinite alternate; transform-origin: center; }
+.audio-bar:nth-child(2n) { animation-delay: 120ms; }
+.audio-bar:nth-child(3n) { animation-delay: 240ms; }
+@keyframes pulse-bar { from { transform: scaleY(.35); } to { transform: scaleY(1); } }
