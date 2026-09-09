@@ -73,6 +73,8 @@ export default function OpenReader({ passages }: Props) {
   const [details, setDetails] = useState<Details>({ name: "", age: "", phone: "", email: "", place: "", consent: false, leaderboardOptIn: false });
   const [errors, setErrors] = useState<Partial<Record<keyof Details, string>>>({});
   const recognition = useRef<SpeechRecognition | null>(null);
+  const microphoneStream = useRef<MediaStream | null>(null);
+  const microphoneStarting = useRef(false);
   const completedText = useRef("");
   const stoppedAt = useRef(0);
   const recognitionRestartCount = useRef(0);
@@ -104,8 +106,16 @@ export default function OpenReader({ passages }: Props) {
       active.onend = null;
       active.abort();
     }
+    microphoneStream.current?.getTracks().forEach((track) => track.stop());
+    microphoneStream.current = null;
     window.speechSynthesis?.cancel();
   }, []);
+
+  function releaseMicrophone() {
+    microphoneStream.current?.getTracks().forEach((track) => track.stop());
+    microphoneStream.current = null;
+    microphoneStarting.current = false;
+  }
 
   function resetAttempt() {
     setStatus("ready"); setSeconds(0); setTranscript(""); setScore(emptyScore); setError(""); setErrors({});
@@ -122,6 +132,7 @@ export default function OpenReader({ passages }: Props) {
     if (recognitionRestartTimer.current) window.clearTimeout(recognitionRestartTimer.current);
     recognitionRestartTimer.current = null;
     recognition.current = null;
+    releaseMicrophone();
     const duration = Math.max(1, Math.floor(((stoppedAt.current || Date.now()) - startedAt.current) / 1000));
     setSeconds(duration);
     if (!completedText.current) {
@@ -134,11 +145,31 @@ export default function OpenReader({ passages }: Props) {
     setStatus("details");
   }
 
-  function startRecording() {
-    if (recognition.current) return;
+  async function startRecording() {
+    if (recognition.current || microphoneStarting.current) return;
+    microphoneStarting.current = true;
     setError("");
     const API = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!API) { setStatus("unsupported"); return; }
+    if (!API) { microphoneStarting.current = false; setStatus("unsupported"); return; }
+
+    try {
+      // Keep one media stream open for the full attempt. Chromium may end and
+      // restart SpeechRecognition sessions during pauses, but the mic itself
+      // should remain active until the reader presses Finish.
+      microphoneStream.current = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch {
+      microphoneStarting.current = false;
+      setStatus("ready");
+      setError(t.recordingError);
+      return;
+    }
+
+    // The component or another start attempt may have taken ownership while
+    // the permission prompt was open.
+    if (recognition.current) {
+      releaseMicrophone();
+      return;
+    }
 
     window.speechSynthesis?.cancel();
     setSamplePlaying(false);
@@ -155,6 +186,13 @@ export default function OpenReader({ passages }: Props) {
     active.continuous = true;
     active.interimResults = true;
     let failed = false;
+    let sessionFinal = "";
+
+    const commitSession = () => {
+      if (!sessionFinal) return;
+      completedText.current = `${completedText.current} ${sessionFinal}`.trim();
+      sessionFinal = "";
+    };
 
     active.onresult = (event) => {
       if (recognition.current !== active) return;
@@ -168,8 +206,8 @@ export default function OpenReader({ passages }: Props) {
         if (result.isFinal) final += result[0].transcript + " ";
         else interim += result[0].transcript + " ";
       }
-      completedText.current = final.trim();
-      setTranscript((final + interim).trim());
+      sessionFinal = final.trim();
+      setTranscript(`${completedText.current} ${sessionFinal} ${interim}`.trim());
     };
     active.onerror = (event) => {
       if (recognition.current !== active) return;
@@ -192,35 +230,34 @@ export default function OpenReader({ passages }: Props) {
                   : t.processingError);
       recognition.current = null;
       active.abort();
+      releaseMicrophone();
       setStatus("ready");
     };
     active.onend = () => {
       if (recognition.current !== active) return;
       if (failed) return;
       if (stoppedAt.current) {
+        commitSession();
         finishRecognition(active);
         return;
       }
-      // Chrome may end a session after a short silence even with continuous mode.
-      // Restarting after a small delay avoids a rapid start/end loop.
+      commitSession();
+      // Chrome may end a recognition session after a short silence even with
+      // continuous mode. Keep recovering until the reader explicitly finishes.
       recognitionRestartCount.current += 1;
-      if (recognitionRestartCount.current > 3) {
-        recognition.current = null;
-        setStatus("ready");
-        setError(completedText.current ? t.processingError : t.stalled);
-        return;
-      }
       recognitionRestartTimer.current = window.setTimeout(() => {
         if (recognition.current !== active || stoppedAt.current) return;
         try { active.start(); } catch { finishRecognition(active); }
-      }, 350);
+      }, Math.min(250 * (2 ** (recognitionRestartCount.current - 1)), 1500));
     };
     try {
       active.start();
+      microphoneStarting.current = false;
       setStatus("recording");
     } catch {
       recognition.current = null;
       active.abort();
+      releaseMicrophone();
       setStatus("ready");
       setError(t.recordingError);
     }

@@ -14,10 +14,11 @@ body {
   margin: 0;
   color: var(--ink);
   background: var(--paper);
-  font-family: Arial, "Noto Sans Devanagari", "Nirmala UI", sans-serif;
+  font-family: var(--font-google-sans), "Google Sans", "Noto Sans Devanagari", "Nirmala UI", Arial, sans-serif;
 }
 
-.serif { font-family: Georgia, "Noto Serif Devanagari", "Nirmala UI", serif; }
+.serif, .font-mono { font-family: var(--font-google-sans), "Google Sans", "Noto Sans Devanagari", "Nirmala UI", Arial, sans-serif; }
+button, input, textarea, select { font: inherit; }
 
 .paper-grain {
   background-color: #f8f4ed;
