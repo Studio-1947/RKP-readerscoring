@@ -29,16 +29,28 @@ body {
 @keyframes pulse-bar { from { transform: scaleY(.35); } to { transform: scaleY(1); } }
 
 .reader-chant { letter-spacing: .01em; }
+/* Word cycle shared with the website hero: the box is sized by an invisible
+   sizer layer holding every word, so nothing clips or shifts as words swap. */
 .flip-word {
-  display: inline-block;
-  transform-origin: center 62%;
-  animation: reader-word-flip 4.8s ease-in-out infinite;
+  display: inline-grid;
+  vertical-align: bottom;
+  text-align: left;
 }
-.flip-word-delayed { animation-delay: .38s; }
-@keyframes reader-word-flip {
-  0%, 72%, 100% { transform: perspective(260px) rotateX(0); }
-  82% { transform: perspective(260px) rotateX(180deg); }
-  92% { transform: perspective(260px) rotateX(360deg); }
+.flip-word > * {
+  grid-area: 1 / 1;
+  white-space: nowrap;
+}
+.flip-word-sizer { visibility: hidden; }
+.flip-word-item {
+  animation: reader-word-cycle 4.8s cubic-bezier(.22, 1, .36, 1) infinite both;
+}
+.flip-word-delayed { animation-delay: 2.4s; }
+@keyframes reader-word-cycle {
+  0% { opacity: 0; transform: translateY(.4em); }
+  7% { opacity: 1; transform: translateY(0); }
+  43% { opacity: 1; transform: translateY(0); }
+  50% { opacity: 0; transform: translateY(-.4em); }
+  50.01%, 100% { opacity: 0; transform: translateY(.4em); }
 }
 .reader-modal { backdrop-filter: blur(3px); }
 .reader-modal-card {
@@ -59,5 +71,7 @@ main { overflow-wrap: anywhere; }
   header button { padding-inline: 10px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .audio-bar, .flip-word { animation: none; }
+  .audio-bar { animation: none; }
+  .flip-word-item { animation: none; opacity: 1; transform: none; }
+  .flip-word-delayed { display: none; }
 }

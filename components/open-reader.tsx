@@ -288,7 +288,7 @@ export default function OpenReader({ passages }: Props) {
 
   return <main className="paper-grain min-h-screen pb-12">
     <header className="border-b border-stone-200 bg-[#fffcf7]/90 px-4 py-3 backdrop-blur sm:px-8"><div className="mx-auto flex max-w-4xl items-center justify-between gap-3">
-      <div className="flex min-w-0 items-center gap-2.5"><Image src="/rajkamal-emblem.svg" alt="Rajkamal" width={44} height={44} priority className="size-11 shrink-0 object-contain" /><p className="reader-chant whitespace-nowrap text-sm font-bold text-[#7e1421]" aria-label="साथ जुड़ें, साथ पढ़ें"><span>साथ </span><span className="flip-word">जुड़ें</span><span>, साथ </span><span className="flip-word flip-word-delayed">पढ़ें</span></p></div>
+      <div className="flex min-w-0 items-center gap-2.5"><Image src="/rajkamal-emblem.svg" alt="Rajkamal" width={44} height={44} priority className="size-11 shrink-0 object-contain" /><p className="reader-chant whitespace-nowrap text-sm font-bold text-[#7e1421]" aria-label="साथ जुड़ें, साथ पढ़ें"><span>साथ </span><span className="flip-word"><span className="flip-word-sizer" aria-hidden="true">जुड़ें</span><span className="flip-word-sizer" aria-hidden="true">पढ़ें</span><span className="flip-word-item" aria-hidden="true">जुड़ें</span><span className="flip-word-item flip-word-delayed" aria-hidden="true">पढ़ें</span></span></p></div>
       <button onClick={() => setLanguage(language === "hi" ? "en" : "hi")} className="flex items-center gap-1.5 rounded-full border border-stone-300 bg-white px-3 py-2 text-xs font-bold text-[#7e1421]"><Languages className="size-3.5" />{language === "hi" ? "English" : "हिंदी"}</button>
     </div></header>
     <section className="mx-auto max-w-4xl px-4 pt-7 sm:px-8 sm:pt-10">
