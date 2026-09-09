@@ -21,10 +21,10 @@ const copy = {
     profileTag: "स्कोर अनलॉक करें", profileTitle: "अपना विस्तृत स्कोर देखें", profileHelp: "अपनी accuracy, pace और passage coverage देखने के लिए ये विवरण भरें।",
     name: "पूरा नाम", age: "आयु", phone: "फ़ोन नंबर", email: "ईमेल (वैकल्पिक)", place: "शहर / स्थान",
     consent: "मैं सहमत हूँ कि राजकमल मेरे स्कोर के लिए ये विवरण इस्तेमाल कर सकता है।",
-    privacy: "आपका browser आवाज़ को अपनी speech सेवा पर भेज सकता है। यह ऐप सहमति के बाद आपके विवरण, पहचाना गया पाठ और स्कोर सहेजता है।",
+    privacy: "आपकी आवाज़ इसी device पर लिखित पाठ में बदली जाती है। यह ऐप सहमति के बाद आपके विवरण, पहचाना गया पाठ और स्कोर सहेजता है।",
     view: "मेरा स्कोर देखें", saving: "सहेजा जा रहा है…", result: "आपका परिणाम", great: "आपका पाठ पूरा हुआ", score: "कुल स्कोर",
     accuracy: "शुद्धता", fluency: "प्रवाह", completion: "पूर्णता", speed: "गति", retry: "फिर पढ़ें", share: "परिणाम शेयर करें",
-    unsupported: "इस browser में आवाज़ पहचान उपलब्ध नहीं है। इंटरनेट के साथ Chrome या Edge पर कोशिश करें।",
+    unsupported: "इस browser में audio recording उपलब्ध नहीं है। नया Chrome, Edge, Firefox या Safari इस्तेमाल करें।",
     recordingError: "माइक्रोफ़ोन की अनुमति दें और फिर कोशिश करें।", processingError: "रिकॉर्डिंग को पढ़ा नहीं जा सका। फिर से कोशिश करें।",
     voiceError: "Hindi आवाज़ उपलब्ध नहीं है। अपनी device voice settings जाँचें।", missing: "यह जानकारी भरें।",
     ageError: "5 से 120 के बीच आयु भरें।", phoneError: "मान्य फ़ोन नंबर भरें।", emailError: "मान्य ईमेल भरें।", copied: "परिणाम कॉपी हो गया है।",
@@ -42,10 +42,10 @@ const copy = {
     profileTag: "UNLOCK YOUR SCORE", profileTitle: "See your reading breakdown", profileHelp: "Complete these details to unlock your accuracy, pace and passage-coverage metrics.",
     name: "Full name", age: "Age", phone: "Phone number", email: "Email (optional)", place: "City / place",
     consent: "I agree that Rajkamal may use these details for my score.",
-    privacy: "Your browser may send audio to its speech service. This app saves your details, recognized text and score after consent.",
+    privacy: "Your recording is transcribed on this device. This app saves your details, recognized text and score after consent.",
     view: "View my score", saving: "Saving…", result: "YOUR RESULT", great: "Your reading is complete", score: "TOTAL SCORE",
     accuracy: "Accuracy", fluency: "Fluency", completion: "Completion", speed: "Speed", retry: "Read again", share: "Share result",
-    unsupported: "Speech recognition is unavailable in this browser. Try Chrome or Edge with an internet connection.",
+    unsupported: "Audio recording is unavailable in this browser. Use a current version of Chrome, Edge, Firefox, or Safari.",
     recordingError: "Allow microphone access and try again.", processingError: "We could not process this recording. Please try again.",
     voiceError: "A Hindi voice is unavailable. Check your device voice settings.", missing: "Complete this field.",
     ageError: "Enter an age from 5 to 120.", phoneError: "Enter a valid phone number.", emailError: "Enter a valid email.", copied: "Your result is copied and ready to share.",
@@ -64,6 +64,24 @@ const micLog = (event: string, details: Record<string, unknown> = {}) => {
   console.info(`[Rajkamal Reader][mic] ${event}`, { at: new Date().toISOString(), ...details });
 };
 
+async function decodeAudio(blob: Blob) {
+  const context = new AudioContext();
+  try {
+    const decoded = await context.decodeAudioData(await blob.arrayBuffer());
+    const sampleRate = 16_000;
+    const outputLength = Math.ceil(decoded.duration * sampleRate);
+    const offline = new OfflineAudioContext(1, outputLength, sampleRate);
+    const source = offline.createBufferSource();
+    source.buffer = decoded;
+    source.connect(offline.destination);
+    source.start();
+    const rendered = await offline.startRendering();
+    return rendered.getChannelData(0).slice();
+  } finally {
+    await context.close();
+  }
+}
+
 export default function OpenReader({ passages }: Props) {
   const [language, setLanguage] = useState<Language>("hi");
   const [index, setIndex] = useState(0);
@@ -73,16 +91,16 @@ export default function OpenReader({ passages }: Props) {
   const [score, setScore] = useState<ReadingScore>(emptyScore);
   const [error, setError] = useState("");
   const [samplePlaying, setSamplePlaying] = useState(false);
+  const [transcriptionStatus, setTranscriptionStatus] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [details, setDetails] = useState<Details>({ name: "", age: "", phone: "", email: "", place: "", consent: false, leaderboardOptIn: false });
   const [errors, setErrors] = useState<Partial<Record<keyof Details, string>>>({});
-  const recognition = useRef<SpeechRecognition | null>(null);
+  const mediaRecorder = useRef<MediaRecorder | null>(null);
   const microphoneStream = useRef<MediaStream | null>(null);
   const microphoneStarting = useRef(false);
-  const completedText = useRef("");
+  const audioChunks = useRef<Blob[]>([]);
+  const transcriptionWorker = useRef<Worker | null>(null);
   const stoppedAt = useRef(0);
-  const recognitionRestartCount = useRef(0);
-  const recognitionRestartTimer = useRef<number | null>(null);
   const listeningToken = useRef(0);
   const listening = useRef(false);
   const startedAt = useRef(0);
@@ -102,17 +120,18 @@ export default function OpenReader({ passages }: Props) {
 
   useEffect(() => () => {
     micLog("component cleanup");
-    if (recognitionRestartTimer.current) window.clearTimeout(recognitionRestartTimer.current);
-    const active = recognition.current;
-    recognition.current = null;
-    if (active) {
-      active.onresult = null;
-      active.onerror = null;
-      active.onend = null;
-      active.abort();
+    const recorder = mediaRecorder.current;
+    mediaRecorder.current = null;
+    if (recorder && recorder.state !== "inactive") {
+      recorder.ondataavailable = null;
+      recorder.onstop = null;
+      recorder.onerror = null;
+      recorder.stop();
     }
     microphoneStream.current?.getTracks().forEach((track) => track.stop());
     microphoneStream.current = null;
+    transcriptionWorker.current?.terminate();
+    transcriptionWorker.current = null;
     window.speechSynthesis?.cancel();
   }, []);
 
@@ -132,7 +151,7 @@ export default function OpenReader({ passages }: Props) {
   }
 
   function resetAttempt() {
-    setStatus("ready"); setSeconds(0); setTranscript(""); setScore(emptyScore); setError(""); setErrors({});
+    setStatus("ready"); setSeconds(0); setTranscript(""); setScore(emptyScore); setError(""); setErrors({}); setTranscriptionStatus("");
   }
 
   function nextPassage() {
@@ -141,41 +160,41 @@ export default function OpenReader({ passages }: Props) {
     resetAttempt();
   }
 
-  function finishRecognition(active: SpeechRecognition) {
-    if (recognition.current !== active) return;
-    if (recognitionRestartTimer.current) window.clearTimeout(recognitionRestartTimer.current);
-    recognitionRestartTimer.current = null;
-    recognition.current = null;
-    releaseMicrophone("recognition finished");
-    const duration = Math.max(1, Math.floor(((stoppedAt.current || Date.now()) - startedAt.current) / 1000));
-    setSeconds(duration);
-    if (!completedText.current) {
-      setError(language === "hi" ? "कोई आवाज़ पहचानी नहीं गई। फिर पढ़ें।" : "No speech was recognized. Please read again.");
-      setStatus("ready");
-      return;
-    }
-    setTranscript(completedText.current);
-    setScore(scoreReading(passage.reference_text, completedText.current, duration, attempts.current));
-    setStatus("details");
+  function transcribeLocally(audio: Float32Array) {
+    return new Promise<string>((resolve, reject) => {
+      const worker = transcriptionWorker.current ?? new Worker(
+        new URL("../workers/transcription.worker.ts", import.meta.url),
+        { type: "module" },
+      );
+      transcriptionWorker.current = worker;
+      worker.onmessage = (event: MessageEvent<{ type: string; text?: string; message?: string }>) => {
+        if (event.data.type === "status" && event.data.message) setTranscriptionStatus(event.data.message);
+        if (event.data.type === "complete") resolve(event.data.text ?? "");
+        if (event.data.type === "error") reject(new Error(event.data.message ?? "Local transcription failed"));
+      };
+      worker.onerror = (event) => reject(new Error(event.message || "Local transcription worker failed"));
+      const device = "gpu" in navigator ? "webgpu" : "wasm";
+      worker.postMessage({ audio, device }, [audio.buffer]);
+    });
   }
 
   async function startRecording() {
-    if (recognition.current || microphoneStarting.current) return;
+    if (mediaRecorder.current || microphoneStarting.current) return;
     microphoneStarting.current = true;
     setError("");
-    const API = window.SpeechRecognition || window.webkitSpeechRecognition;
     micLog("start requested", {
-      recognitionSupported: Boolean(API),
+      mediaRecorderSupported: typeof MediaRecorder !== "undefined",
       mediaDevicesSupported: Boolean(navigator.mediaDevices?.getUserMedia),
       visibilityState: document.visibilityState,
       secureContext: window.isSecureContext,
     });
-    if (!API) { microphoneStarting.current = false; setStatus("unsupported"); return; }
+    if (typeof MediaRecorder === "undefined" || !navigator.mediaDevices?.getUserMedia) {
+      microphoneStarting.current = false;
+      setStatus("unsupported");
+      return;
+    }
 
     try {
-      // Keep one media stream open for the full attempt. Chromium may end and
-      // restart SpeechRecognition sessions during pauses, but the mic itself
-      // should remain active until the reader presses Finish.
       micLog("requesting browser microphone permission");
       microphoneStream.current = await navigator.mediaDevices.getUserMedia({ audio: true });
       const audioTracks = microphoneStream.current.getAudioTracks();
@@ -197,140 +216,69 @@ export default function OpenReader({ passages }: Props) {
       return;
     }
 
-    // The component or another start attempt may have taken ownership while
-    // the permission prompt was open.
-    if (recognition.current) {
-      releaseMicrophone("duplicate start request");
-      return;
-    }
-
     window.speechSynthesis?.cancel();
     setSamplePlaying(false);
-    const active = new API();
-    recognition.current = active;
-    completedText.current = "";
+    audioChunks.current = [];
     stoppedAt.current = 0;
-    recognitionRestartCount.current = 0;
     startedAt.current = Date.now();
     attempts.current += 1;
     setTranscript("");
     setSeconds(0);
-    active.lang = "hi-IN";
-    active.continuous = true;
-    active.interimResults = true;
-    let failed = false;
-    let sessionFinal = "";
-
-    const commitSession = () => {
-      if (!sessionFinal) return;
-      completedText.current = `${completedText.current} ${sessionFinal}`.trim();
-      sessionFinal = "";
-    };
-
-    active.onstart = () => micLog("speech recognition started", { restart: recognitionRestartCount.current });
-    active.onaudiostart = () => micLog("speech recognition audio capture started");
-    active.onaudioend = () => micLog("speech recognition audio capture ended");
-    active.onsoundstart = () => micLog("sound detected");
-    active.onsoundend = () => micLog("sound detection ended");
-    active.onspeechstart = () => micLog("speech detected");
-    active.onspeechend = () => micLog("speech detection ended");
-
-    active.onresult = (event) => {
-      if (recognition.current !== active) return;
-      recognitionRestartCount.current = 0;
-      setError("");
-      let final = "";
-      let interim = "";
-      // Rebuild from the session results, so repeated events cannot duplicate words.
-      for (let i = 0; i < event.results.length; i += 1) {
-        const result = event.results[i];
-        if (result.isFinal) final += result[0].transcript + " ";
-        else interim += result[0].transcript + " ";
-      }
-      sessionFinal = final.trim();
-      micLog("recognition result", { finalCharacters: final.trim().length, interimCharacters: interim.trim().length });
-      setTranscript(`${completedText.current} ${sessionFinal} ${interim}`.trim());
-    };
-    active.onerror = (event) => {
-      if (recognition.current !== active) return;
-      const code = event.error;
-      console.error("[Rajkamal Reader][mic] speech recognition error", {
-        at: new Date().toISOString(),
-        code,
-        stoppedByUser: Boolean(stoppedAt.current),
-        restart: recognitionRestartCount.current,
-      });
-      // Recoverable codes. Chrome can report "network" when its remote speech
-      // service briefly disconnects even though the local microphone is fine.
-      // Keep the media stream alive and let onend retry with a backoff.
-      if (code === "no-speech") { setError(t.noSpeechHint); return; }
-      if (code === "network") { setError(t.networkError); return; }
-      if (code === "aborted") return;
-
-      failed = true;
-      if (recognitionRestartTimer.current) window.clearTimeout(recognitionRestartTimer.current);
-      recognitionRestartTimer.current = null;
-      setError(
-        code === "not-allowed" ? t.recordingError
-          : code === "service-not-allowed" ? t.serviceBlocked
-            : code === "audio-capture" ? t.noMicFound
-              : code === "language-not-supported" ? t.langUnsupported
-                : t.processingError);
-      recognition.current = null;
-      active.abort();
-      releaseMicrophone(`fatal recognition error: ${code}`);
-      setStatus("ready");
-    };
-    active.onend = () => {
-      micLog("speech recognition ended", {
-        failed,
-        stoppedByUser: Boolean(stoppedAt.current),
-        restart: recognitionRestartCount.current,
-        streamActive: microphoneStream.current?.active ?? false,
-      });
-      if (recognition.current !== active) return;
-      if (failed) return;
-      if (stoppedAt.current) {
-        commitSession();
-        finishRecognition(active);
-        return;
-      }
-      commitSession();
-      // Chrome may end a recognition session after a short silence even with
-      // continuous mode. Keep recovering until the reader explicitly finishes.
-      recognitionRestartCount.current += 1;
-      recognitionRestartTimer.current = window.setTimeout(() => {
-        if (recognition.current !== active || stoppedAt.current) return;
-        micLog("restarting speech recognition", { restart: recognitionRestartCount.current });
-        try { active.start(); } catch (caught) {
-          console.error("[Rajkamal Reader][mic] recognition restart threw", caught);
-          finishRecognition(active);
-        }
-      }, Math.min(250 * (2 ** (recognitionRestartCount.current - 1)), 5000));
-    };
+    const mimeType = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"]
+      .find((candidate) => MediaRecorder.isTypeSupported(candidate));
     try {
-      active.start();
-      micLog("speech recognition start invoked");
+      const recorder = new MediaRecorder(microphoneStream.current, {
+        ...(mimeType ? { mimeType } : {}),
+        audioBitsPerSecond: 32_000,
+      });
+      mediaRecorder.current = recorder;
+      recorder.ondataavailable = (event) => {
+        if (event.data.size) audioChunks.current.push(event.data);
+      };
+      recorder.onerror = (event) => {
+        console.error("[Rajkamal Reader][mic] MediaRecorder error", event);
+        setError(t.processingError);
+      };
+      recorder.onstop = async () => {
+        mediaRecorder.current = null;
+        releaseMicrophone("recording completed");
+        const duration = Math.max(1, Math.floor((stoppedAt.current - startedAt.current) / 1000));
+        setSeconds(duration);
+        try {
+          const blob = new Blob(audioChunks.current, { type: recorder.mimeType || "audio/webm" });
+          micLog("recording ready for local transcription", { bytes: blob.size, mimeType: blob.type, duration });
+          const text = await transcribeLocally(await decodeAudio(blob));
+          if (!text) throw new Error("No speech was recognized");
+          setTranscript(text);
+          setScore(scoreReading(passage.reference_text, text, duration, attempts.current));
+          setError("");
+          setStatus("details");
+        } catch (caught) {
+          console.error("[Rajkamal Reader][mic] local transcription failed", caught);
+          setError(t.processingError);
+          setStatus("ready");
+        }
+      };
+      recorder.start(1000);
+      micLog("MediaRecorder started", { mimeType: recorder.mimeType });
       microphoneStarting.current = false;
       setStatus("recording");
     } catch (caught) {
-      console.error("[Rajkamal Reader][mic] recognition start threw", caught);
-      recognition.current = null;
-      active.abort();
-      releaseMicrophone("recognition start threw");
+      console.error("[Rajkamal Reader][mic] MediaRecorder start failed", caught);
+      mediaRecorder.current = null;
+      releaseMicrophone("MediaRecorder start failed");
       setStatus("ready");
       setError(t.recordingError);
     }
   }
 
   function finishRecording() {
-    const active = recognition.current;
-    if (!active || stoppedAt.current) return;
+    const recorder = mediaRecorder.current;
+    if (!recorder || recorder.state === "inactive" || stoppedAt.current) return;
     stoppedAt.current = Date.now();
     micLog("finish requested by reader");
     setStatus("transcribing");
-    // Wait for the final result and end event before scoring.
-    try { active.stop(); } catch { finishRecognition(active); }
+    recorder.stop();
   }
 
   function listen() {
@@ -404,7 +352,7 @@ export default function OpenReader({ passages }: Props) {
 
   const field = "mt-1.5 w-full rounded-xl border border-stone-300 bg-white px-3 py-3 outline-none focus:border-[#b42332] focus:ring-2 focus:ring-[#b42332]/15";
   const statusTitle = recording ? t.recording : status === "transcribing" ? t.transcribing : t.ready;
-  const statusHelp = recording ? t.recordingHelp : status === "transcribing" ? t.transcribingHelp : t.help;
+  const statusHelp = recording ? t.recordingHelp : status === "transcribing" ? (transcriptionStatus || t.transcribingHelp) : t.help;
 
   return <main className="paper-grain min-h-screen pb-12">
     <header className="border-b border-stone-200 bg-[#fffcf7]/90 px-4 py-3 backdrop-blur sm:px-8 sm:py-4 lg:py-5"><div className="mx-auto flex max-w-4xl items-center justify-between gap-3">
