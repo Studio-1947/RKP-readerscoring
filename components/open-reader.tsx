@@ -63,6 +63,10 @@ export default function OpenReader({ passages }: Props) {
   const recognition = useRef<SpeechRecognition | null>(null);
   const completedText = useRef("");
   const stoppedAt = useRef(0);
+  const recognitionRestartCount = useRef(0);
+  const recognitionRestartTimer = useRef<number | null>(null);
+  const listeningToken = useRef(0);
+  const listening = useRef(false);
   const startedAt = useRef(0);
   const attempts = useRef(0);
 
@@ -79,6 +83,7 @@ export default function OpenReader({ passages }: Props) {
   }, [recording]);
 
   useEffect(() => () => {
+    if (recognitionRestartTimer.current) window.clearTimeout(recognitionRestartTimer.current);
     const active = recognition.current;
     recognition.current = null;
     if (active) {
@@ -100,6 +105,23 @@ export default function OpenReader({ passages }: Props) {
     resetAttempt();
   }
 
+  function finishRecognition(active: SpeechRecognition) {
+    if (recognition.current !== active) return;
+    if (recognitionRestartTimer.current) window.clearTimeout(recognitionRestartTimer.current);
+    recognitionRestartTimer.current = null;
+    recognition.current = null;
+    const duration = Math.max(1, Math.floor(((stoppedAt.current || Date.now()) - startedAt.current) / 1000));
+    setSeconds(duration);
+    if (!completedText.current) {
+      setError(language === "hi" ? "कोई आवाज़ पहचानी नहीं गई। फिर पढ़ें।" : "No speech was recognized. Please read again.");
+      setStatus("ready");
+      return;
+    }
+    setTranscript(completedText.current);
+    setScore(scoreReading(passage.reference_text, completedText.current, duration, attempts.current));
+    setStatus("details");
+  }
+
   function startRecording() {
     if (recognition.current) return;
     setError("");
@@ -112,6 +134,7 @@ export default function OpenReader({ passages }: Props) {
     recognition.current = active;
     completedText.current = "";
     stoppedAt.current = 0;
+    recognitionRestartCount.current = 0;
     startedAt.current = Date.now();
     attempts.current += 1;
     setTranscript("");
@@ -123,6 +146,7 @@ export default function OpenReader({ passages }: Props) {
 
     active.onresult = (event) => {
       if (recognition.current !== active) return;
+      recognitionRestartCount.current = 0;
       let final = "";
       let interim = "";
       // Rebuild from the session results, so repeated events cannot duplicate words.
@@ -137,6 +161,8 @@ export default function OpenReader({ passages }: Props) {
     active.onerror = (event) => {
       if (recognition.current !== active) return;
       failed = true;
+      if (recognitionRestartTimer.current) window.clearTimeout(recognitionRestartTimer.current);
+      recognitionRestartTimer.current = null;
       setError(event.error === "not-allowed" || event.error === "audio-capture"
         ? t.recordingError
         : language === "hi"
@@ -148,18 +174,24 @@ export default function OpenReader({ passages }: Props) {
     };
     active.onend = () => {
       if (recognition.current !== active) return;
-      recognition.current = null;
       if (failed) return;
-      const duration = Math.max(1, Math.floor(((stoppedAt.current || Date.now()) - startedAt.current) / 1000));
-      setSeconds(duration);
-      if (!completedText.current) {
-        setError(language === "hi" ? "कोई आवाज़ पहचानी नहीं गई। फिर पढ़ें।" : "No speech was recognized. Please read again.");
-        setStatus("ready");
+      if (stoppedAt.current) {
+        finishRecognition(active);
         return;
       }
-      setTranscript(completedText.current);
-      setScore(scoreReading(passage.reference_text, completedText.current, duration, attempts.current));
-      setStatus("details");
+      // Chrome may end a session after a short silence even with continuous mode.
+      // Restarting after a small delay avoids a rapid start/end loop.
+      recognitionRestartCount.current += 1;
+      if (recognitionRestartCount.current > 3) {
+        recognition.current = null;
+        setStatus("ready");
+        setError(language === "hi" ? "आवाज़ पहचान बार-बार रुक रही है। इंटरनेट जाँचें और फिर कोशिश करें।" : "Speech recognition kept stopping. Check your internet connection and try again.");
+        return;
+      }
+      recognitionRestartTimer.current = window.setTimeout(() => {
+        if (recognition.current !== active || stoppedAt.current) return;
+        try { active.start(); } catch { finishRecognition(active); }
+      }, 350);
     };
     try {
       active.start();
@@ -178,19 +210,49 @@ export default function OpenReader({ passages }: Props) {
     stoppedAt.current = Date.now();
     setStatus("transcribing");
     // Wait for the final result and end event before scoring.
-    active.stop();
+    try { active.stop(); } catch { finishRecognition(active); }
   }
 
   function listen() {
     const synth = window.speechSynthesis;
     if (!synth) { setError(t.voiceError); return; }
-    if (samplePlaying) { synth.cancel(); setSamplePlaying(false); return; }
+    if (listening.current || samplePlaying) {
+      listeningToken.current += 1;
+      listening.current = false;
+      synth.cancel();
+      setSamplePlaying(false);
+      return;
+    }
+    const token = listeningToken.current + 1;
+    listeningToken.current = token;
     synth.cancel();
     const utterance = new SpeechSynthesisUtterance(passage.reference_text);
-    utterance.lang = "hi-IN"; utterance.rate = 0.8;
-    utterance.onend = () => setSamplePlaying(false);
-    utterance.onerror = () => { setSamplePlaying(false); setError(t.voiceError); };
-    synth.speak(utterance); setSamplePlaying(true);
+    utterance.lang = "hi-IN"; utterance.rate = 0.82; utterance.pitch = 1;
+    utterance.voice = synth.getVoices().find((voice) => voice.lang.toLowerCase() === "hi-in")
+      ?? synth.getVoices().find((voice) => voice.lang.toLowerCase().startsWith("hi"))
+      ?? null;
+    const stop = () => {
+      if (listeningToken.current !== token) return;
+      listening.current = false;
+      setSamplePlaying(false);
+    };
+    utterance.onstart = () => {
+      if (listeningToken.current !== token) return;
+      listening.current = true;
+      setSamplePlaying(true);
+    };
+    utterance.onend = stop;
+    utterance.onerror = () => {
+      stop();
+      if (listeningToken.current === token) setError(t.voiceError);
+    };
+    synth.speak(utterance);
+    // Chrome occasionally leaves synthesis paused after cancelling a prior utterance.
+    window.setTimeout(() => {
+      if (listeningToken.current === token && synth.paused) synth.resume();
+    }, 80);
+    listening.current = true;
+    setSamplePlaying(true);
   }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
