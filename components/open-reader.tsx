@@ -260,10 +260,11 @@ export default function OpenReader({ passages }: Props) {
         stoppedByUser: Boolean(stoppedAt.current),
         restart: recognitionRestartCount.current,
       });
-      // Recoverable codes. A silent pause ("no-speech") and an interrupted
-      // session ("aborted") are routine mid-reading, so leave the session
-      // alive and let onend restart it instead of ending the recording.
+      // Recoverable codes. Chrome can report "network" when its remote speech
+      // service briefly disconnects even though the local microphone is fine.
+      // Keep the media stream alive and let onend retry with a backoff.
       if (code === "no-speech") { setError(t.noSpeechHint); return; }
+      if (code === "network") { setError(t.networkError); return; }
       if (code === "aborted") return;
 
       failed = true;
@@ -273,9 +274,8 @@ export default function OpenReader({ passages }: Props) {
         code === "not-allowed" ? t.recordingError
           : code === "service-not-allowed" ? t.serviceBlocked
             : code === "audio-capture" ? t.noMicFound
-              : code === "network" ? t.networkError
-                : code === "language-not-supported" ? t.langUnsupported
-                  : t.processingError);
+              : code === "language-not-supported" ? t.langUnsupported
+                : t.processingError);
       recognition.current = null;
       active.abort();
       releaseMicrophone(`fatal recognition error: ${code}`);
@@ -306,7 +306,7 @@ export default function OpenReader({ passages }: Props) {
           console.error("[Rajkamal Reader][mic] recognition restart threw", caught);
           finishRecognition(active);
         }
-      }, Math.min(250 * (2 ** (recognitionRestartCount.current - 1)), 1500));
+      }, Math.min(250 * (2 ** (recognitionRestartCount.current - 1)), 5000));
     };
     try {
       active.start();
