@@ -2,12 +2,14 @@
 
 import { FormEvent, useEffect, useRef, useState } from "react";
 import Image from "next/image";
-import { ScoreGuide, Leaderboard } from "@/components/reading-context";
+import { ScoreGuide } from "@/components/reading-context";
+import { ReaderDashboard } from "@/components/reader-dashboard";
 import { BookOpen, Info, Languages, Mic, MicOff, Play, RotateCcw, Share2, Timer, Volume2 } from "lucide-react";
 import { ReadingScore, scoreReading } from "@/lib/scoring";
 import { saveReaderAttempt } from "@/lib/reader-storage";
 
 type Language = "hi" | "en";
+type View = "practice" | "leaderboard" | "progress";
 type Status = "ready" | "recording" | "transcribing" | "details" | "result" | "unsupported";
 type Passage = { id: string; sequence: number; title: string; difficulty_editorial: string; lines: string[]; reference_text: string; word_count_whitespace: number };
 type Details = { name: string; age: string; phone: string; email: string; place: string; consent: boolean; leaderboardOptIn: boolean };
@@ -21,10 +23,10 @@ const copy = {
     profileTag: "स्कोर अनलॉक करें", profileTitle: "अपना विस्तृत स्कोर देखें", profileHelp: "अपनी accuracy, pace और passage coverage देखने के लिए ये विवरण भरें।",
     name: "पूरा नाम", age: "आयु", phone: "फ़ोन नंबर", email: "ईमेल (वैकल्पिक)", place: "शहर / स्थान",
     consent: "मैं सहमत हूँ कि राजकमल मेरे स्कोर के लिए ये विवरण इस्तेमाल कर सकता है।",
-    privacy: "आपका browser आवाज़ को अपनी speech सेवा पर भेज सकता है। यह ऐप सहमति के बाद आपके विवरण, पहचाना गया पाठ और स्कोर सहेजता है।",
+    privacy: "आपकी आवाज़ इसी device पर लिखित पाठ में बदली जाती है। यह ऐप सहमति के बाद आपके विवरण, पहचाना गया पाठ और स्कोर सहेजता है।",
     view: "मेरा स्कोर देखें", saving: "सहेजा जा रहा है…", result: "आपका परिणाम", great: "आपका पाठ पूरा हुआ", score: "कुल स्कोर",
     accuracy: "शुद्धता", fluency: "प्रवाह", completion: "पूर्णता", speed: "गति", retry: "फिर पढ़ें", share: "परिणाम शेयर करें",
-    unsupported: "इस browser में आवाज़ पहचान उपलब्ध नहीं है। इंटरनेट के साथ Chrome या Edge पर कोशिश करें।",
+    unsupported: "इस browser में audio recording उपलब्ध नहीं है। नया Chrome, Edge, Firefox या Safari इस्तेमाल करें।",
     recordingError: "माइक्रोफ़ोन की अनुमति दें और फिर कोशिश करें।", processingError: "रिकॉर्डिंग को पढ़ा नहीं जा सका। फिर से कोशिश करें।",
     voiceError: "Hindi आवाज़ उपलब्ध नहीं है। अपनी device voice settings जाँचें।", missing: "यह जानकारी भरें।",
     ageError: "5 से 120 के बीच आयु भरें।", phoneError: "मान्य फ़ोन नंबर भरें।", emailError: "मान्य ईमेल भरें।", copied: "परिणाम कॉपी हो गया है।",
@@ -42,10 +44,10 @@ const copy = {
     profileTag: "UNLOCK YOUR SCORE", profileTitle: "See your reading breakdown", profileHelp: "Complete these details to unlock your accuracy, pace and passage-coverage metrics.",
     name: "Full name", age: "Age", phone: "Phone number", email: "Email (optional)", place: "City / place",
     consent: "I agree that Rajkamal may use these details for my score.",
-    privacy: "Your browser may send audio to its speech service. This app saves your details, recognized text and score after consent.",
+    privacy: "Your recording is transcribed on this device. This app saves your details, recognized text and score after consent.",
     view: "View my score", saving: "Saving…", result: "YOUR RESULT", great: "Your reading is complete", score: "TOTAL SCORE",
     accuracy: "Accuracy", fluency: "Fluency", completion: "Completion", speed: "Speed", retry: "Read again", share: "Share result",
-    unsupported: "Speech recognition is unavailable in this browser. Try Chrome or Edge with an internet connection.",
+    unsupported: "Audio recording is unavailable in this browser. Use a current version of Chrome, Edge, Firefox, or Safari.",
     recordingError: "Allow microphone access and try again.", processingError: "We could not process this recording. Please try again.",
     voiceError: "A Hindi voice is unavailable. Check your device voice settings.", missing: "Complete this field.",
     ageError: "Enter an age from 5 to 120.", phoneError: "Enter a valid phone number.", emailError: "Enter a valid email.", copied: "Your result is copied and ready to share.",
@@ -64,8 +66,27 @@ const micLog = (event: string, details: Record<string, unknown> = {}) => {
   console.info(`[Rajkamal Reader][mic] ${event}`, { at: new Date().toISOString(), ...details });
 };
 
+async function decodeAudio(blob: Blob) {
+  const context = new AudioContext();
+  try {
+    const decoded = await context.decodeAudioData(await blob.arrayBuffer());
+    const sampleRate = 16_000;
+    const outputLength = Math.ceil(decoded.duration * sampleRate);
+    const offline = new OfflineAudioContext(1, outputLength, sampleRate);
+    const source = offline.createBufferSource();
+    source.buffer = decoded;
+    source.connect(offline.destination);
+    source.start();
+    const rendered = await offline.startRendering();
+    return rendered.getChannelData(0).slice();
+  } finally {
+    await context.close();
+  }
+}
+
 export default function OpenReader({ passages }: Props) {
   const [language, setLanguage] = useState<Language>("hi");
+  const [activeView, setActiveView] = useState<View>("practice");
   const [index, setIndex] = useState(0);
   const [status, setStatus] = useState<Status>("ready");
   const [seconds, setSeconds] = useState(0);
@@ -73,16 +94,16 @@ export default function OpenReader({ passages }: Props) {
   const [score, setScore] = useState<ReadingScore>(emptyScore);
   const [error, setError] = useState("");
   const [samplePlaying, setSamplePlaying] = useState(false);
+  const [transcriptionStatus, setTranscriptionStatus] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [details, setDetails] = useState<Details>({ name: "", age: "", phone: "", email: "", place: "", consent: false, leaderboardOptIn: false });
   const [errors, setErrors] = useState<Partial<Record<keyof Details, string>>>({});
-  const recognition = useRef<SpeechRecognition | null>(null);
+  const mediaRecorder = useRef<MediaRecorder | null>(null);
   const microphoneStream = useRef<MediaStream | null>(null);
   const microphoneStarting = useRef(false);
-  const completedText = useRef("");
+  const audioChunks = useRef<Blob[]>([]);
+  const transcriptionWorker = useRef<Worker | null>(null);
   const stoppedAt = useRef(0);
-  const recognitionRestartCount = useRef(0);
-  const recognitionRestartTimer = useRef<number | null>(null);
   const listeningToken = useRef(0);
   const listening = useRef(false);
   const startedAt = useRef(0);
@@ -102,17 +123,18 @@ export default function OpenReader({ passages }: Props) {
 
   useEffect(() => () => {
     micLog("component cleanup");
-    if (recognitionRestartTimer.current) window.clearTimeout(recognitionRestartTimer.current);
-    const active = recognition.current;
-    recognition.current = null;
-    if (active) {
-      active.onresult = null;
-      active.onerror = null;
-      active.onend = null;
-      active.abort();
+    const recorder = mediaRecorder.current;
+    mediaRecorder.current = null;
+    if (recorder && recorder.state !== "inactive") {
+      recorder.ondataavailable = null;
+      recorder.onstop = null;
+      recorder.onerror = null;
+      recorder.stop();
     }
     microphoneStream.current?.getTracks().forEach((track) => track.stop());
     microphoneStream.current = null;
+    transcriptionWorker.current?.terminate();
+    transcriptionWorker.current = null;
     window.speechSynthesis?.cancel();
   }, []);
 
@@ -132,7 +154,7 @@ export default function OpenReader({ passages }: Props) {
   }
 
   function resetAttempt() {
-    setStatus("ready"); setSeconds(0); setTranscript(""); setScore(emptyScore); setError(""); setErrors({});
+    setStatus("ready"); setSeconds(0); setTranscript(""); setScore(emptyScore); setError(""); setErrors({}); setTranscriptionStatus("");
   }
 
   function nextPassage() {
@@ -141,41 +163,41 @@ export default function OpenReader({ passages }: Props) {
     resetAttempt();
   }
 
-  function finishRecognition(active: SpeechRecognition) {
-    if (recognition.current !== active) return;
-    if (recognitionRestartTimer.current) window.clearTimeout(recognitionRestartTimer.current);
-    recognitionRestartTimer.current = null;
-    recognition.current = null;
-    releaseMicrophone("recognition finished");
-    const duration = Math.max(1, Math.floor(((stoppedAt.current || Date.now()) - startedAt.current) / 1000));
-    setSeconds(duration);
-    if (!completedText.current) {
-      setError(language === "hi" ? "कोई आवाज़ पहचानी नहीं गई। फिर पढ़ें।" : "No speech was recognized. Please read again.");
-      setStatus("ready");
-      return;
-    }
-    setTranscript(completedText.current);
-    setScore(scoreReading(passage.reference_text, completedText.current, duration, attempts.current));
-    setStatus("details");
+  function transcribeLocally(audio: Float32Array) {
+    return new Promise<string>((resolve, reject) => {
+      const worker = transcriptionWorker.current ?? new Worker(
+        new URL("../workers/transcription.worker.ts", import.meta.url),
+        { type: "module" },
+      );
+      transcriptionWorker.current = worker;
+      worker.onmessage = (event: MessageEvent<{ type: string; text?: string; message?: string }>) => {
+        if (event.data.type === "status" && event.data.message) setTranscriptionStatus(event.data.message);
+        if (event.data.type === "complete") resolve(event.data.text ?? "");
+        if (event.data.type === "error") reject(new Error(event.data.message ?? "Local transcription failed"));
+      };
+      worker.onerror = (event) => reject(new Error(event.message || "Local transcription worker failed"));
+      const device = "gpu" in navigator ? "webgpu" : "wasm";
+      worker.postMessage({ audio, device }, [audio.buffer]);
+    });
   }
 
   async function startRecording() {
-    if (recognition.current || microphoneStarting.current) return;
+    if (mediaRecorder.current || microphoneStarting.current) return;
     microphoneStarting.current = true;
     setError("");
-    const API = window.SpeechRecognition || window.webkitSpeechRecognition;
     micLog("start requested", {
-      recognitionSupported: Boolean(API),
+      mediaRecorderSupported: typeof MediaRecorder !== "undefined",
       mediaDevicesSupported: Boolean(navigator.mediaDevices?.getUserMedia),
       visibilityState: document.visibilityState,
       secureContext: window.isSecureContext,
     });
-    if (!API) { microphoneStarting.current = false; setStatus("unsupported"); return; }
+    if (typeof MediaRecorder === "undefined" || !navigator.mediaDevices?.getUserMedia) {
+      microphoneStarting.current = false;
+      setStatus("unsupported");
+      return;
+    }
 
     try {
-      // Keep one media stream open for the full attempt. Chromium may end and
-      // restart SpeechRecognition sessions during pauses, but the mic itself
-      // should remain active until the reader presses Finish.
       micLog("requesting browser microphone permission");
       microphoneStream.current = await navigator.mediaDevices.getUserMedia({ audio: true });
       const audioTracks = microphoneStream.current.getAudioTracks();
@@ -197,140 +219,69 @@ export default function OpenReader({ passages }: Props) {
       return;
     }
 
-    // The component or another start attempt may have taken ownership while
-    // the permission prompt was open.
-    if (recognition.current) {
-      releaseMicrophone("duplicate start request");
-      return;
-    }
-
     window.speechSynthesis?.cancel();
     setSamplePlaying(false);
-    const active = new API();
-    recognition.current = active;
-    completedText.current = "";
+    audioChunks.current = [];
     stoppedAt.current = 0;
-    recognitionRestartCount.current = 0;
     startedAt.current = Date.now();
     attempts.current += 1;
     setTranscript("");
     setSeconds(0);
-    active.lang = "hi-IN";
-    active.continuous = true;
-    active.interimResults = true;
-    let failed = false;
-    let sessionFinal = "";
-
-    const commitSession = () => {
-      if (!sessionFinal) return;
-      completedText.current = `${completedText.current} ${sessionFinal}`.trim();
-      sessionFinal = "";
-    };
-
-    active.onstart = () => micLog("speech recognition started", { restart: recognitionRestartCount.current });
-    active.onaudiostart = () => micLog("speech recognition audio capture started");
-    active.onaudioend = () => micLog("speech recognition audio capture ended");
-    active.onsoundstart = () => micLog("sound detected");
-    active.onsoundend = () => micLog("sound detection ended");
-    active.onspeechstart = () => micLog("speech detected");
-    active.onspeechend = () => micLog("speech detection ended");
-
-    active.onresult = (event) => {
-      if (recognition.current !== active) return;
-      recognitionRestartCount.current = 0;
-      setError("");
-      let final = "";
-      let interim = "";
-      // Rebuild from the session results, so repeated events cannot duplicate words.
-      for (let i = 0; i < event.results.length; i += 1) {
-        const result = event.results[i];
-        if (result.isFinal) final += result[0].transcript + " ";
-        else interim += result[0].transcript + " ";
-      }
-      sessionFinal = final.trim();
-      micLog("recognition result", { finalCharacters: final.trim().length, interimCharacters: interim.trim().length });
-      setTranscript(`${completedText.current} ${sessionFinal} ${interim}`.trim());
-    };
-    active.onerror = (event) => {
-      if (recognition.current !== active) return;
-      const code = event.error;
-      console.error("[Rajkamal Reader][mic] speech recognition error", {
-        at: new Date().toISOString(),
-        code,
-        stoppedByUser: Boolean(stoppedAt.current),
-        restart: recognitionRestartCount.current,
-      });
-      // Recoverable codes. Chrome can report "network" when its remote speech
-      // service briefly disconnects even though the local microphone is fine.
-      // Keep the media stream alive and let onend retry with a backoff.
-      if (code === "no-speech") { setError(t.noSpeechHint); return; }
-      if (code === "network") { setError(t.networkError); return; }
-      if (code === "aborted") return;
-
-      failed = true;
-      if (recognitionRestartTimer.current) window.clearTimeout(recognitionRestartTimer.current);
-      recognitionRestartTimer.current = null;
-      setError(
-        code === "not-allowed" ? t.recordingError
-          : code === "service-not-allowed" ? t.serviceBlocked
-            : code === "audio-capture" ? t.noMicFound
-              : code === "language-not-supported" ? t.langUnsupported
-                : t.processingError);
-      recognition.current = null;
-      active.abort();
-      releaseMicrophone(`fatal recognition error: ${code}`);
-      setStatus("ready");
-    };
-    active.onend = () => {
-      micLog("speech recognition ended", {
-        failed,
-        stoppedByUser: Boolean(stoppedAt.current),
-        restart: recognitionRestartCount.current,
-        streamActive: microphoneStream.current?.active ?? false,
-      });
-      if (recognition.current !== active) return;
-      if (failed) return;
-      if (stoppedAt.current) {
-        commitSession();
-        finishRecognition(active);
-        return;
-      }
-      commitSession();
-      // Chrome may end a recognition session after a short silence even with
-      // continuous mode. Keep recovering until the reader explicitly finishes.
-      recognitionRestartCount.current += 1;
-      recognitionRestartTimer.current = window.setTimeout(() => {
-        if (recognition.current !== active || stoppedAt.current) return;
-        micLog("restarting speech recognition", { restart: recognitionRestartCount.current });
-        try { active.start(); } catch (caught) {
-          console.error("[Rajkamal Reader][mic] recognition restart threw", caught);
-          finishRecognition(active);
-        }
-      }, Math.min(250 * (2 ** (recognitionRestartCount.current - 1)), 5000));
-    };
+    const mimeType = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"]
+      .find((candidate) => MediaRecorder.isTypeSupported(candidate));
     try {
-      active.start();
-      micLog("speech recognition start invoked");
+      const recorder = new MediaRecorder(microphoneStream.current, {
+        ...(mimeType ? { mimeType } : {}),
+        audioBitsPerSecond: 32_000,
+      });
+      mediaRecorder.current = recorder;
+      recorder.ondataavailable = (event) => {
+        if (event.data.size) audioChunks.current.push(event.data);
+      };
+      recorder.onerror = (event) => {
+        console.error("[Rajkamal Reader][mic] MediaRecorder error", event);
+        setError(t.processingError);
+      };
+      recorder.onstop = async () => {
+        mediaRecorder.current = null;
+        releaseMicrophone("recording completed");
+        const duration = Math.max(1, Math.floor((stoppedAt.current - startedAt.current) / 1000));
+        setSeconds(duration);
+        try {
+          const blob = new Blob(audioChunks.current, { type: recorder.mimeType || "audio/webm" });
+          micLog("recording ready for local transcription", { bytes: blob.size, mimeType: blob.type, duration });
+          const text = await transcribeLocally(await decodeAudio(blob));
+          if (!text) throw new Error("No speech was recognized");
+          setTranscript(text);
+          setScore(scoreReading(passage.reference_text, text, duration, attempts.current));
+          setError("");
+          setStatus("details");
+        } catch (caught) {
+          console.error("[Rajkamal Reader][mic] local transcription failed", caught);
+          setError(t.processingError);
+          setStatus("ready");
+        }
+      };
+      recorder.start(1000);
+      micLog("MediaRecorder started", { mimeType: recorder.mimeType });
       microphoneStarting.current = false;
       setStatus("recording");
     } catch (caught) {
-      console.error("[Rajkamal Reader][mic] recognition start threw", caught);
-      recognition.current = null;
-      active.abort();
-      releaseMicrophone("recognition start threw");
+      console.error("[Rajkamal Reader][mic] MediaRecorder start failed", caught);
+      mediaRecorder.current = null;
+      releaseMicrophone("MediaRecorder start failed");
       setStatus("ready");
       setError(t.recordingError);
     }
   }
 
   function finishRecording() {
-    const active = recognition.current;
-    if (!active || stoppedAt.current) return;
+    const recorder = mediaRecorder.current;
+    if (!recorder || recorder.state === "inactive" || stoppedAt.current) return;
     stoppedAt.current = Date.now();
     micLog("finish requested by reader");
     setStatus("transcribing");
-    // Wait for the final result and end event before scoring.
-    try { active.stop(); } catch { finishRecognition(active); }
+    recorder.stop();
   }
 
   function listen() {
@@ -402,16 +353,54 @@ export default function OpenReader({ passages }: Props) {
     else { await navigator.clipboard.writeText(message); setError(t.copied); }
   }
 
+  function downloadScoreCard() {
+    const canvas = document.createElement("canvas");
+    canvas.width = 1200;
+    canvas.height = 630;
+    const context = canvas.getContext("2d");
+    if (!context) return;
+    context.fillStyle = "#9f1420";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.fillStyle = "#c91e2b";
+    context.beginPath();
+    context.arc(1080, 80, 250, 0, Math.PI * 2);
+    context.fill();
+    context.fillStyle = "#e5b043";
+    context.fillRect(70, 70, 86, 12);
+    context.fillStyle = "#ffffff";
+    context.font = "700 34px Arial";
+    context.fillText(language === "hi" ? "राजकमल हिंदी रीडिंग स्कोर" : "Rajkamal Hindi Reading Score", 70, 140);
+    context.font = "700 54px Arial";
+    context.fillText(passage.title.slice(0, 30), 70, 235);
+    context.font = "900 175px Arial";
+    context.fillText(String(score.total), 70, 475);
+    context.font = "700 34px Arial";
+    context.fillText("/100", 285, 465);
+    context.fillStyle = "#ffe8a7";
+    context.font = "700 26px Arial";
+    context.fillText(`${score.accuracy}% accuracy · ${score.wordsPerMinute} WPM`, 70, 555);
+    canvas.toBlob((blob) => {
+      if (!blob) return;
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "rajkamal-reading-score.png";
+      link.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }, "image/png");
+  }
+
   const field = "mt-1.5 w-full rounded-xl border border-stone-300 bg-white px-3 py-3 outline-none focus:border-[#b42332] focus:ring-2 focus:ring-[#b42332]/15";
   const statusTitle = recording ? t.recording : status === "transcribing" ? t.transcribing : t.ready;
-  const statusHelp = recording ? t.recordingHelp : status === "transcribing" ? t.transcribingHelp : t.help;
+  const statusHelp = recording ? t.recordingHelp : status === "transcribing" ? (transcriptionStatus || t.transcribingHelp) : t.help;
 
-  return <main className="paper-grain min-h-screen pb-12">
-    <header className="border-b border-stone-200 bg-[#fffcf7]/90 px-4 py-3 backdrop-blur sm:px-8 sm:py-4 lg:py-5"><div className="mx-auto flex max-w-4xl items-center justify-between gap-3">
+  return <main className="paper-grain min-h-screen pb-24">
+    <header className="reader-topbar"><div className="mx-auto flex max-w-6xl items-center justify-between gap-3">
       <div className="flex min-w-0 items-center gap-2.5 sm:gap-3 lg:gap-4"><Image src="/rajkamal-emblem.svg" alt="Rajkamal" width={60} height={60} priority className="size-10 shrink-0 object-contain sm:size-12 lg:size-15" /><p className="reader-chant whitespace-nowrap text-sm font-bold text-[#7e1421] sm:text-lg lg:text-2xl" aria-label="साथ जुड़ें, साथ पढ़ें"><span>साथ </span><span className="flip-word"><span className="flip-word-sizer" aria-hidden="true">जुड़ें</span><span className="flip-word-sizer" aria-hidden="true">पढ़ें</span><span className="flip-word-item" aria-hidden="true">जुड़ें</span><span className="flip-word-item flip-word-delayed" aria-hidden="true">पढ़ें</span></span></p></div>
-      <button onClick={() => setLanguage(language === "hi" ? "en" : "hi")} className="flex shrink-0 items-center gap-1.5 rounded-full border border-stone-300 bg-white px-3 py-2 text-xs font-bold text-[#7e1421] sm:gap-2 sm:px-4 sm:text-sm lg:px-5 lg:text-base"><Languages className="size-3.5 sm:size-4 lg:size-4.5" />{language === "hi" ? "English" : "हिंदी"}</button>
+      <nav className="desktop-reader-nav" aria-label={language === "hi" ? "मुख्य नेविगेशन" : "Main navigation"}>{(["practice", "leaderboard", "progress"] as View[]).map((view) => <button key={view} className={activeView === view ? "active" : ""} onClick={() => setActiveView(view)}>{view === "practice" ? (language === "hi" ? "आज का पाठ" : "Today’s reading") : view === "leaderboard" ? (language === "hi" ? "लीडरबोर्ड" : "Leaderboard") : (language === "hi" ? "मेरी प्रगति" : "My progress")}</button>)}</nav>
+      <button onClick={() => setLanguage(language === "hi" ? "en" : "hi")} className="flex shrink-0 items-center gap-1.5 rounded-xl border border-stone-300 bg-white px-3 py-2 text-xs font-bold text-[#7e1421] sm:gap-2 sm:px-4 sm:text-sm lg:px-5 lg:text-base"><Languages className="size-3.5 sm:size-4 lg:size-4.5" />{language === "hi" ? "English" : "हिंदी"}</button>
     </div></header>
-    <section className="mx-auto max-w-4xl px-4 pt-7 sm:px-8 sm:pt-10">
+    {activeView === "practice" ? <section className="mx-auto max-w-6xl px-4 pt-7 sm:px-8 sm:pt-10">
       <div className="mb-5 flex flex-wrap items-center justify-between gap-3"><div><p className="text-xs font-bold tracking-[.18em] text-[#b42332]">{language === "hi" ? "आज का अभ्यास" : "TODAY'S PRACTICE"}</p><h1 className="serif mt-1 text-xl font-bold sm:text-3xl">{t.motto}</h1></div><button onClick={nextPassage} disabled={busy} className="flex items-center gap-2 rounded-full border border-stone-300 bg-white px-4 py-2 text-sm font-semibold hover:border-[#b42332] hover:text-[#b42332] disabled:opacity-40"><RotateCcw className="size-4" />{t.newPassage}</button></div>
       <article className="overflow-hidden rounded-xl border border-stone-200 bg-[#fffdf9] ">
         <div className="flex flex-wrap items-start justify-between gap-3 border-b border-stone-100 bg-[#fff7ec] px-5 py-4 sm:px-8"><div><div className="mb-2 flex gap-2"><span className="rounded-full bg-[#b42332] px-2.5 py-1 text-[10px] font-bold text-white">{language === "hi" ? "पाठ" : "PASSAGE"} {passage.sequence}/100</span><span className="rounded-full bg-white px-2.5 py-1 text-[10px] font-semibold text-stone-600">{passage.difficulty_editorial}</span></div><h2 className="serif text-xl font-bold sm:text-2xl">{passage.title}</h2></div><button onClick={listen} disabled={busy} className="flex items-center gap-2 rounded-full px-2 py-2 text-xs font-bold text-[#7e1421] disabled:opacity-40"><Volume2 className={`size-4 ${samplePlaying ? "animate-pulse text-[#b42332]" : ""}`} />{samplePlaying ? t.stopListen : t.listen}</button></div>
@@ -426,9 +415,9 @@ export default function OpenReader({ passages }: Props) {
       <ScoreGuide hindi={language === "hi"} />
       {status === "unsupported" && <div className="mt-5 rounded-2xl border border-amber-300 bg-amber-50 p-5 text-sm text-amber-950">{t.unsupported}</div>}
       {status === "details" && <div className="reader-modal fixed inset-0 z-50 flex items-end bg-stone-950/45 p-0 sm:items-center sm:justify-center sm:p-6" role="presentation"><section role="dialog" aria-modal="true" aria-labelledby="score-unlock-title" className="reader-modal-card mt-5 max-h-[92dvh] w-full overflow-y-auto rounded-xl border border-[#e5b043]/70 bg-[#fffaf0] p-5 sm:p-7"><p className="text-xs font-bold tracking-[.16em] text-[#b42332]">{t.profileTag}</p><h2 id="score-unlock-title" className="serif mt-1 text-2xl font-bold">{t.profileTitle}</h2><p className="mt-2 text-sm text-stone-600">{t.profileHelp}</p><p className="mt-4 rounded-xl bg-white/80 px-4 py-3 text-sm leading-6 text-stone-700">{transcript}</p>{error && <p className="mt-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-[#b42332]"><Info className="mr-1 inline size-4" />{error}</p>}<form onSubmit={submit} className="mt-6 grid gap-4 sm:grid-cols-2"><FormField label={t.name} error={errors.name}><input autoFocus value={details.name} onChange={(event) => setDetails({ ...details, name: event.target.value })} autoComplete="name" className={field} /></FormField><FormField label={t.age} error={errors.age}><input value={details.age} onChange={(event) => setDetails({ ...details, age: event.target.value })} type="number" min="5" max="120" className={field} /></FormField><FormField label={t.phone} error={errors.phone}><input value={details.phone} onChange={(event) => setDetails({ ...details, phone: event.target.value })} autoComplete="tel" inputMode="tel" placeholder="+91 98765 43210" className={field} /></FormField><FormField label={t.email} error={errors.email}><input value={details.email} onChange={(event) => setDetails({ ...details, email: event.target.value })} autoComplete="email" type="email" className={field} /></FormField><div className="sm:col-span-2"><FormField label={t.place} error={errors.place}><input value={details.place} onChange={(event) => setDetails({ ...details, place: event.target.value })} autoComplete="address-level2" className={field} /></FormField></div><label className="flex items-start gap-3 rounded-xl border border-[#eadabb] bg-white px-4 py-3 text-xs leading-5 text-stone-600 sm:col-span-2"><input checked={details.consent} onChange={(event) => setDetails({ ...details, consent: event.target.checked })} type="checkbox" className="mt-0.5 size-4 accent-[#b42332]" /><span>{t.consent}{errors.consent && <strong className="mt-1 block text-[#b42332]">{errors.consent}</strong>}</span></label><label className="flex items-start gap-3 text-xs leading-5 text-stone-600 sm:col-span-2"><input type="checkbox" checked={details.leaderboardOptIn} onChange={event => setDetails({ ...details, leaderboardOptIn: event.target.checked })} className="mt-0.5 size-4 accent-[#b42332]" /><span>{language === "hi" ? "अपना सर्वश्रेष्ठ स्कोर सूची में दिखाएँ। केवल एक अनाम Reader पहचान दिखेगी। बाद में इस विकल्प को हटाकर परिणाम सहेजने पर सूची से हट सकते हैं।" : "Show my best score on the leaderboard under an anonymous Reader label. To leave, uncheck this and save another result."}</span></label><p className="text-xs leading-5 text-stone-500 sm:col-span-2"><Info className="mr-1 inline size-3.5" />{t.privacy}</p><button disabled={isSaving} className="flex items-center justify-center gap-2 rounded-full bg-[#b42332] px-5 py-3 text-sm font-bold text-white hover:bg-[#7e1421] disabled:cursor-wait disabled:opacity-60 sm:col-span-2">{isSaving ? t.saving : t.view}</button></form></section></div>}
-      {status === "result" && <section className="mt-5 rounded-xl border border-[#e5b043]/70 bg-[#fffaf0] p-5  sm:p-7"><div className="flex flex-col justify-between gap-5 sm:flex-row sm:items-start"><div><p className="flex items-center gap-2 text-xs font-bold tracking-[.16em] text-[#b42332]">{t.result}</p><h2 className="serif mt-2 text-3xl font-bold">{t.great}</h2></div><div className="rounded-2xl bg-[#b42332] px-6 py-4 text-center text-white"><p className="text-xs font-bold uppercase tracking-widest text-white/70">{t.score}</p><p className="serif text-4xl font-bold">{score.total}<span className="text-lg text-white/70">/100</span></p></div></div><div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4"><Metric label={t.accuracy} value={`${score.accuracy}%`} /><Metric label={t.fluency} value={`${score.fluency}%`} /><Metric label={t.completion} value={`${score.completion}%`} /><Metric label={t.speed} value={`${score.wordsPerMinute} WPM`} /></div><div className="mt-6 flex flex-col gap-3 border-t border-[#eadabb] pt-5 sm:flex-row"><button onClick={resetAttempt} className="flex flex-1 items-center justify-center gap-2 rounded-full border border-[#b42332] px-4 py-3 text-sm font-bold text-[#b42332]"><RotateCcw className="size-4" />{t.retry}</button><button onClick={share} className="flex flex-1 items-center justify-center gap-2 rounded-full bg-[#b42332] px-4 py-3 text-sm font-bold text-white"><Share2 className="size-4" />{t.share}</button></div></section>}
-      <Leaderboard hindi={language === "hi"} refresh={status} />
-    </section>
+      {status === "result" && <section className="mt-5 rounded-xl border border-[#e5b043]/70 bg-[#fffaf0] p-5  sm:p-7"><div className="flex flex-col justify-between gap-5 sm:flex-row sm:items-start"><div><p className="flex items-center gap-2 text-xs font-bold tracking-[.16em] text-[#b42332]">{t.result}</p><h2 className="serif mt-2 text-3xl font-bold">{t.great}</h2></div><div className="rounded-2xl bg-[#b42332] px-6 py-4 text-center text-white"><p className="text-xs font-bold uppercase tracking-widest text-white/70">{t.score}</p><p className="serif text-4xl font-bold">{score.total}<span className="text-lg text-white/70">/100</span></p></div></div><div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4"><Metric label={t.accuracy} value={`${score.accuracy}%`} /><Metric label={t.fluency} value={`${score.fluency}%`} /><Metric label={t.completion} value={`${score.completion}%`} /><Metric label={t.speed} value={`${score.wordsPerMinute} WPM`} /></div><div className="mt-6 flex flex-col gap-3 border-t border-[#eadabb] pt-5 sm:flex-row"><button onClick={resetAttempt} className="flex flex-1 items-center justify-center gap-2 rounded-full border border-[#b42332] px-4 py-3 text-sm font-bold text-[#b42332]"><RotateCcw className="size-4" />{t.retry}</button><button onClick={downloadScoreCard} className="flex flex-1 items-center justify-center rounded-full border border-[#b42332] px-4 py-3 text-sm font-bold text-[#b42332]">{language === "hi" ? "स्कोर कार्ड डाउनलोड" : "Download score card"}</button><button onClick={share} className="flex flex-1 items-center justify-center gap-2 rounded-full bg-[#b42332] px-4 py-3 text-sm font-bold text-white"><Share2 className="size-4" />{t.share}</button></div></section>}
+    </section> : <ReaderDashboard view={activeView} hindi={language === "hi"} refresh={status} onPractice={() => setActiveView("practice")} />}
+    <nav className="mobile-reader-nav" aria-label={language === "hi" ? "मोबाइल नेविगेशन" : "Mobile navigation"}>{(["practice", "leaderboard", "progress"] as View[]).map((view) => <button key={view} className={activeView === view ? "active" : ""} onClick={() => setActiveView(view)}>{view === "practice" ? (language === "hi" ? "पाठ" : "Read") : view === "leaderboard" ? (language === "hi" ? "सूची" : "Leaders") : (language === "hi" ? "प्रगति" : "Progress")}</button>)}</nav>
   </main>;
 }
 

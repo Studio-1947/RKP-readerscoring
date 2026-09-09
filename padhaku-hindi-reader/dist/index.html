@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="hi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#c91e2b" />
+    <meta name="description" content="पढ़ो, बोलो और अपना हिंदी रीडिंग स्कोर बेहतर बनाओ।" />
+    <title>पढ़ाकू — हिंदी रीडिंग क्लब</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <a class="brand" href="#practice" aria-label="पढ़ाकू होम">
+          <span class="brand-mark" aria-hidden="true">प</span>
+          <span><strong>पढ़ाकू</strong><small id="brandSubtitle">हिंदी रीडिंग क्लब</small></span>
+        </a>
+        <nav class="desktop-nav" aria-label="मुख्य नेविगेशन">
+          <a class="active" href="#practice">आज का पाठ</a>
+          <a href="#leaderboard">लीडरबोर्ड</a>
+          <a href="#progress">मेरी प्रगति</a>
+        </nav>
+        <div class="header-actions">
+          <label class="language-select"><span class="sr-only">भाषा / Language</span><select id="languageSelect" aria-label="इंटरफ़ेस भाषा / Interface language"><option value="hi" lang="hi">हिंदी</option><option value="en" lang="en">English</option></select></label>
+          <button class="login-button" id="loginBtn" type="button"><span aria-hidden="true">●</span><span id="loginLabel">लॉग इन</span></button>
+        </div>
+      </header>
+
+      <main>
+        <section class="practice-view" data-view="practice">
+          <div class="practice-intro">
+            <div>
+              <p class="eyebrow">हिंदी रीडिंग स्कोर</p>
+              <h1>पढ़िए, रिकॉर्ड कीजिए, स्कोर बढ़ाइए।</h1>
+              <p>आज का छोटा हिंदी पाठ अपनी आवाज़ में पढ़ें।</p>
+            </div>
+          </div>
+          <div class="content-grid">
+          <section class="practice-card" id="practice" aria-labelledby="story-title">
+            <div class="practice-head">
+              <div class="lesson-meta">
+                <span class="lesson-number">पाठ 1 / 100</span>
+                <span class="level"><i aria-hidden="true"></i> सहज साहित्यिक</span>
+              </div>
+              <div class="lesson-progress" aria-label="एक प्रतिशत पाठ पूरे"><span></span></div>
+            </div>
+
+            <div class="story-title-row">
+              <div>
+                <p class="collection">नई रचना</p>
+                <h2 id="story-title">आँगन की धूप</h2>
+              </div>
+              <button class="listen-button" id="listenBtn" type="button">
+                <span class="listen-icon" aria-hidden="true">▶</span><span>पहले सुनें</span>
+              </button>
+            </div>
+
+            <article class="passage" aria-label="पढ़ने के लिए हिंदी पाठ">
+              <p>दोपहर की धूप आँगन में चुपचाप आकर बैठ गई थी।</p>
+              <p>दादी ने अपनी खाट सरकाकर उसके लिए जगह कर दी।</p>
+              <p>रस्सी पर सूखते कपड़ों से साबुन की गंध उठ रही थी।</p>
+              <p>मैं उनकी हथेली की रेखाओं में कोई रास्ता खोजता रहा।</p>
+              <p>उन्होंने पूछा, “इतनी दूर कहाँ जाने की तैयारी है?”</p>
+              <p>मैंने उँगली रोक दी; घर उनकी हथेली में ही था।</p>
+            </article>
+
+            <div class="passage-footer">
+              <span>60 शब्द</span><span>लगभग 1 मिनट</span><span>हिंदी</span>
+            </div>
+
+            <div class="record-zone" aria-live="polite">
+              <div class="record-copy">
+                <strong id="recordStatus">तैयार हैं? अपनी आवाज़ में पढ़ें</strong>
+                <span id="recordHint">गलती की चिंता मत कीजिए — बस शुरू करें</span>
+              </div>
+              <div class="record-actions">
+                <span class="timer" id="timer">00:00</span>
+                <button class="record-button" id="recordBtn" type="button">
+                  <span class="mic" aria-hidden="true">●</span><span id="recordLabel">रिकॉर्डिंग शुरू करें</span>
+                </button>
+              </div>
+            </div>
+            <section class="score-result" id="scoreResult" hidden aria-labelledby="score-result-title">
+              <div class="score-ring"><strong>78</strong><span>/100</span></div>
+              <div class="score-result-copy">
+                <p class="eyebrow">नमूना परिणाम</p>
+                <h2 id="score-result-title">बहुत बढ़िया — आपकी आवाज़ साफ़ थी!</h2>
+                <div class="result-metrics"><span>उच्चारण <b>82</b></span><span>सहजता <b>74</b></span><span>गति <b>70</b></span></div>
+                <p>असली स्कोरिंग सेवा जुड़ने पर यहाँ आपकी रिकॉर्डिंग का वास्तविक परिणाम दिखेगा।</p>
+                <div class="score-actions"><button id="shareScoreBtn" type="button">स्कोर कार्ड शेयर करें</button><button id="downloadScoreBtn" type="button">डाउनलोड</button></div>
+              </div>
+            </section>
+          </section>
+
+          <aside class="side-column">
+            <section class="leader-card" aria-labelledby="leader-title">
+              <div class="section-heading">
+                <div><p class="eyebrow">इस हफ्ते</p><h2 id="leader-title">लीडरबोर्ड</h2></div>
+                <button class="info-button" id="scoreInfo" type="button" aria-label="स्कोर कैसे बनता है">?</button>
+              </div>
+              <div class="leader-preview" aria-label="शीर्ष तीन पाठक">
+                <p><span>1</span><strong>विवान</strong><b>94</b></p>
+                <p><span>2</span><strong>अनया</strong><b>87</b></p>
+                <p><span>3</span><strong>कबीर</strong><b>81</b></p>
+              </div>
+              <div class="your-rank"><span>आपका स्थान</span><strong>#6</strong><b>58 /100</b></div>
+              <a class="full-board" href="#leaderboard">पूरी सूची देखें <span aria-hidden="true">→</span></a>
+            </section>
+            <section class="streak-mini" aria-labelledby="streak-mini-title">
+              <div class="streak-mini-head"><div><p class="eyebrow">राजकमल रीडिंग रिवार्ड्स</p><h2 id="streak-mini-title">5 दिन की स्ट्रीक</h2></div><span>🔥</span></div>
+              <div class="streak-progress"><span style="width:24%"></span></div>
+              <p><strong>16 दिन और</strong> पढ़ें और पहला राजकमल पुस्तक ऑफ़र अनलॉक करें।</p>
+              <a href="#progress">सभी रिवार्ड लेवल देखें →</a>
+            </section>
+          </aside>
+          </div>
+        </section>
+        <section class="detail-view" data-view="leaderboard" id="leaderboard" hidden aria-labelledby="board-title">
+          <div class="view-heading"><div><p class="eyebrow">साथ पढ़ें, आगे बढ़ें</p><h1 id="board-title">लीडरबोर्ड</h1><p>हर पाठक का सबसे अच्छा प्रदर्शन, एक जगह।</p></div><div class="view-actions"><span class="demo-tag">नमूना डेटा</span><button class="download-button" data-download="leaderboard" type="button">डाउनलोड</button></div></div>
+          <div class="board-toolbar"><div class="segmented" role="group" aria-label="लीडरबोर्ड अवधि"><button data-period="week" aria-pressed="true">इस हफ्ते</button><button data-period="all" aria-pressed="false">अब तक</button></div><label class="search-label"><span>पाठक खोजें</span><input id="readerSearch" type="search" placeholder="नाम या Reading Club ID…" autocomplete="off"></label></div>
+          <div class="board-summary" aria-label="लीडरबोर्ड सारांश"><span><b id="readerCount">8</b> पाठक</span><span><b id="topScore">94</b> शीर्ष स्कोर</span><span><b id="yourRank">#6</b> आपका स्थान</span></div>
+          <section class="leader-insights" aria-label="लीडरबोर्ड इन्फ़ोग्राफ़िक्स">
+            <article class="insight-panel average-panel">
+              <div class="line-icon" aria-hidden="true"><svg viewBox="0 0 32 32"><path d="M5 22a12 12 0 1 1 22 0"/><path d="m16 19 6-7"/><circle cx="16" cy="19" r="2"/><path d="M8 22h16"/></svg></div>
+              <div><p id="averageLabel">औसत स्कोर</p><strong id="averageScore">76</strong><span id="averageTrend">↑ 6 अंक इस हफ्ते</span></div>
+              <div class="mini-gauge" aria-hidden="true"><span id="averageGauge"></span></div>
+            </article>
+            <article class="insight-panel distribution-panel">
+              <div class="insight-title"><div class="line-icon" aria-hidden="true"><svg viewBox="0 0 32 32"><path d="M6 25V15M16 25V7M26 25V11"/><path d="M3 25h26"/><path d="m6 11 7-5 6 3 8-6"/></svg></div><div><p id="distributionLabel">स्कोर का स्तर</p><span id="distributionIntro">पाठकों का वितरण</span></div></div>
+              <div class="stacked-score" aria-hidden="true"><span class="excellent" id="excellentBar"></span><span class="strong" id="strongBar"></span><span class="growing" id="growingBar"></span></div>
+              <div class="score-legend"><span><i class="excellent"></i><b id="excellentCount">1</b><span id="excellentLabel">उत्कृष्ट</span></span><span><i class="strong"></i><b id="strongCount">3</b><span id="strongLabel">मजबूत</span></span><span><i class="growing"></i><b id="growingCount">4</b><span id="growingLabel">अभ्यास जारी</span></span></div>
+            </article>
+            <article class="insight-panel activity-panel">
+              <div class="insight-title"><div class="line-icon" aria-hidden="true"><svg viewBox="0 0 32 32"><path d="M4 7c5-2 9-1 12 2v17c-3-3-7-4-12-2Z"/><path d="M28 7c-5-2-9-1-12 2v17c3-3 7-4 12-2Z"/><path d="M16 9v17"/></svg></div><div><p id="activityLabel">रीडिंग गतिविधि</p><span><b id="lessonTotal">130</b> <span id="lessonsLabel">पाठ पूरे</span></span></div></div>
+              <div class="activity-spark" id="activitySpark" aria-label="सात दिनों की नमूना रीडिंग गतिविधि"></div>
+              <div class="spark-days" aria-hidden="true"><span>सो</span><span>मं</span><span>बु</span><span>गु</span><span>शु</span><span>श</span><span>र</span></div>
+            </article>
+          </section>
+          <div id="topReaders" class="top-readers" aria-label="शीर्ष तीन पाठक"></div>
+          <div class="detail-card ranking-card"><div class="card-title"><h2>सभी पाठक</h2><span id="resultCount" aria-live="polite"></span></div><div class="table-scroll"><table class="reader-table"><thead><tr><th scope="col">स्थान</th><th scope="col">पाठक</th><th scope="col">पूरे पाठ</th><th scope="col">सर्वश्रेष्ठ स्कोर</th></tr></thead><tbody id="readerRows"></tbody></table></div><p id="noReaders" class="empty-search" hidden>इस नाम का पाठक नहीं मिला। कोई दूसरा नाम खोजें।</p><p class="table-note">ऊँचे स्कोर को ऊँचा स्थान मिलता है। बराबर स्कोर पर समान स्थान। ये स्कोर केवल डिज़ाइन दिखाने के लिए हैं।</p></div>
+          <div class="next-step"><div><h2>अगली बारी आपकी!</h2><p>एक पाठ पढ़ें और अपनी आवाज़ को समय दें।</p></div><a class="primary-link" href="#practice">पढ़ना शुरू करें →</a></div>
+        </section>
+
+        <section class="detail-view" data-view="progress" id="progress" hidden aria-labelledby="progress-title">
+          <div class="view-heading"><div><p class="eyebrow">हर अभ्यास मायने रखता है</p><h1 id="progress-title">मेरी प्रगति</h1><p>अपनी पढ़ने की आदत और सुधार को समझें।</p></div><div class="view-actions"><span class="demo-tag">नमूना डेटा</span><button class="download-button" data-download="scoreboard" type="button">स्कोरबोर्ड डाउनलोड</button></div></div>
+          <div class="progress-summary"><span><small>सर्वश्रेष्ठ स्कोर</small><strong>78<em>/100</em></strong></span><span><small>पूरे पाठ</small><strong>12</strong></span><span><small>मौजूदा स्ट्रीक</small><strong>🔥 5<em> दिन</em></strong></span><a href="#practice">आज का अभ्यास →</a></div>
+          <section class="reward-journey" aria-labelledby="rewards-title">
+            <div class="reward-heading">
+              <div><p class="eyebrow">पढ़ने की आदत का इनाम</p><h2 id="rewards-title">राजकमल रीडिंग रिवार्ड्स</h2><p>स्ट्रीक बनाएँ और नए पुस्तक ऑफ़र खोलें।</p></div>
+            </div>
+            <div class="reward-track" aria-label="5 दिन पूरे; अगला रिवार्ड 21 दिन पर">
+              <span style="width:1.37%"></span>
+            </div>
+            <div class="reward-levels">
+              <article class="next-reward">
+                <span class="level-number">लेवल 1</span>
+                <div class="reward-badge">21<small>दिन</small></div>
+                <h3>आरंभ पाठक</h3>
+                <p>पहला पुस्तक ऑफ़र</p>
+                <strong>16 दिन बाकी</strong>
+              </article>
+              <article>
+                <span class="level-number">लेवल 2</span>
+                <div class="reward-badge">100<small>दिन</small></div>
+                <h3>समर्पित पाठक</h3>
+                <p>बेहतर पुस्तक ऑफ़र</p>
+                <strong>95 दिन बाकी</strong>
+              </article>
+              <article>
+                <span class="level-number">लेवल 3</span>
+                <div class="reward-badge">365<small>दिन</small></div>
+                <h3>महापाठक</h3>
+                <p>सबसे खास रीडर ऑफ़र</p>
+                <strong>360 दिन बाकी</strong>
+              </article>
+            </div>
+            <p class="reward-note">ऑफ़र का मूल्य, पात्र किताबें और उपयोग की शर्तें अभियान तय होने पर यहाँ दिखाई जाएँगी।</p>
+          </section>
+          <div class="progress-grid"><section class="detail-card"><div class="card-title"><div><p class="eyebrow">छोटे कदम, साफ़ सुधार</p><h2>स्कोर की यात्रा</h2></div><span class="positive">+20 अंक</span></div><p class="subtle">पिछले 7 अभ्यास · स्कोर /100</p><div id="scoreChart" class="score-chart" role="img" aria-label="नमूना स्कोर: 58, 63, 61, 68, 72, 75 और 78।"></div><div class="chart-caption"><span>पहला अभ्यास</span><span>सबसे हाल का</span></div></section>
+          <section class="detail-card"><div class="card-title"><h2>इस हफ्ते का लक्ष्य</h2><span class="goal-count">5 / 7 दिन</span></div><p class="subtle">हर दिन एक पाठ पढ़ने का समय निकालें।</p><div class="activity-week" aria-label="सोमवार से शुक्रवार तक अभ्यास पूरा; शनिवार और रविवार बाकी"><span class="complete">सो<b>✓</b></span><span class="complete">मं<b>✓</b></span><span class="complete">बु<b>✓</b></span><span class="complete">गु<b>✓</b></span><span class="complete">शु<b>✓</b></span><span>श<b>—</b></span><span>र<b>—</b></span></div><progress value="5" max="7" aria-label="साप्ताहिक लक्ष्य: 7 में से 5 दिन"></progress><p class="goal-note">बस 2 दिन और। अपनी लय बनाए रखें!</p></section></div>
+          <section class="detail-card skills-card"><div class="card-title"><h2>रीडिंग स्किल्स</h2><span>नमूना स्कोर</span></div><div class="skills-row"><div class="skill-meter"><div><strong>उच्चारण</strong><span>82</span></div><progress value="82" max="100" aria-label="नमूना उच्चारण स्कोर 82"></progress></div><div class="skill-meter"><div><strong>सहजता</strong><span>74</span></div><progress value="74" max="100" aria-label="नमूना सहजता स्कोर 74"></progress></div><div class="skill-meter"><div><strong>गति</strong><span>70</span></div><progress value="70" max="100" aria-label="नमूना गति स्कोर 70"></progress></div></div></section>
+          <p class="preview-note">यह प्रगति उदाहरण के लिए दिखाई गई है। आपकी वास्तविक रिकॉर्डिंग से अभी स्कोर या प्रगति नहीं बनती।</p>
+        </section>
+      </main>
+
+      <nav class="mobile-nav" aria-label="मोबाइल नेविगेशन">
+        <a class="active" href="#practice"><span aria-hidden="true">◫</span>पाठ</a>
+        <a href="#leaderboard"><span aria-hidden="true">♜</span>लीडरबोर्ड</a>
+        <a href="#progress"><span aria-hidden="true">↗</span>प्रगति</a>
+      </nav>
+    </div>
+
+    <dialog id="scoreDialog">
+      <button class="dialog-close" type="button" aria-label="बंद करें">×</button>
+      <p class="eyebrow">आपका रीडिंग स्कोर</p>
+      <h2>तीन चीज़ें मिलकर स्कोर बनाती हैं</h2>
+      <div class="score-parts">
+        <p><b>40%</b><span>सही उच्चारण</span></p>
+        <p><b>35%</b><span>पढ़ने की सहजता</span></p>
+        <p><b>25%</b><span>सही गति</span></p>
+      </div>
+      <p class="dialog-note">हर पाठ का आपका सबसे अच्छा स्कोर लीडरबोर्ड में जुड़ता है।</p>
+    </dialog>
+
+    <dialog id="authDialog" class="auth-dialog">
+      <button class="dialog-close" data-close="authDialog" type="button" aria-label="बंद करें">×</button>
+      <div id="profileStep">
+        <p class="eyebrow">रीडिंग क्लब अकाउंट</p>
+        <h2>अपनी रीडिंग पहचान बनाएँ</h2>
+        <p class="dialog-intro">डाउनलोड, स्कोर कार्ड शेयर और Reading Club ID के लिए लॉग इन करें।</p>
+        <form id="profileForm">
+          <label>नाम<input id="profileName" name="name" autocomplete="name" required placeholder="अपना नाम"></label>
+          <label>मोबाइल / WhatsApp नंबर<input id="profilePhone" name="phone" type="tel" inputmode="numeric" autocomplete="tel" required pattern="[0-9]{10}" maxlength="10" placeholder="10 अंकों का नंबर"></label>
+          <fieldset><legend>OTP कहाँ पाएँ?</legend><label class="radio-option"><input type="radio" name="channel" value="sms" checked> मोबाइल SMS</label><label class="radio-option"><input type="radio" name="channel" value="whatsapp"> WhatsApp</label></fieldset>
+          <label>PIN कोड<input id="profilePin" name="pin" inputmode="numeric" autocomplete="postal-code" required pattern="[0-9]{6}" maxlength="6" placeholder="6 अंकों का PIN कोड"></label>
+          <label>पसंदीदा लेखक <span>वैकल्पिक</span><input id="profileAuthors" name="authors" placeholder="जैसे: प्रेमचंद, मन्नू भंडारी"></label>
+          <label>पसंदीदा किताबें <span>वैकल्पिक</span><input id="profileBooks" name="books" placeholder="जैसे: गोदान, महाभोज"></label>
+          <button class="auth-primary" type="submit">OTP भेजें</button>
+        </form>
+      </div>
+      <div id="otpStep" hidden>
+        <p class="eyebrow">OTP वेरिफ़िकेशन</p>
+        <h2>अपना नंबर वेरिफ़ाई करें</h2>
+        <p class="dialog-intro">छह अंकों का OTP <strong id="maskedPhone"></strong> पर भेजा गया है।</p>
+        <p class="demo-otp">डेमो OTP: <strong>123456</strong><span>वास्तविक SMS/WhatsApp सेवा जुड़ने पर यह संदेश हटेगा।</span></p>
+        <form id="otpForm">
+          <label>OTP<input id="otpInput" inputmode="numeric" autocomplete="one-time-code" required pattern="[0-9]{6}" maxlength="6" placeholder="••••••"></label>
+          <p class="form-error" id="otpError" hidden>OTP सही नहीं है। डेमो के लिए 123456 डालें।</p>
+          <button class="auth-primary" type="submit">वेरिफ़ाई करके लॉग इन करें</button>
+          <button class="auth-secondary" id="backToProfile" type="button">जानकारी बदलें</button>
+        </form>
+      </div>
+      <div id="accountStep" hidden>
+        <p class="eyebrow">रीडिंग क्लब प्रोफ़ाइल</p>
+        <div class="account-identity"><span id="accountInitial">आ</span><div><h2 id="accountName">आप</h2><button id="copyClubId" type="button"><span id="accountClubId">RKP-000000</span> कॉपी करें</button></div></div>
+        <dl class="account-details"><div><dt>मोबाइल</dt><dd id="accountPhone"></dd></div><div><dt>PIN कोड</dt><dd id="accountPin"></dd></div><div><dt>पसंदीदा लेखक</dt><dd id="accountAuthors">—</dd></div><div><dt>पसंदीदा किताबें</dt><dd id="accountBooks">—</dd></div></dl>
+        <p class="privacy-note">स्कोर कार्ड शेयर करते समय आपका नाम, स्कोर, स्ट्रीक और Reading Club ID सार्वजनिक लिंक में दिखाई देंगे। मोबाइल नंबर और PIN कोड शेयर नहीं होंगे।</p>
+        <button class="auth-secondary" id="demoLogout" type="button">डेमो अकाउंट से लॉग आउट</button>
+      </div>
+    </dialog>
+
+    <dialog id="shareProfileDialog" class="share-profile-dialog">
+      <button class="dialog-close" data-close="shareProfileDialog" type="button" aria-label="बंद करें">×</button>
+      <p class="eyebrow">सार्वजनिक रीडिंग कार्ड</p>
+      <div class="public-score-card">
+        <span class="public-initial" id="publicInitial">प</span>
+        <h2 id="publicName">पाठक</h2>
+        <p id="publicClubId">RKP-000000</p>
+        <strong><span id="publicScore">78</span><small>/100</small></strong>
+        <div><span>हिंदी रीडिंग स्कोर</span><span id="publicStreak">🔥 5 दिन की स्ट्रीक</span></div>
+      </div>
+      <p class="dialog-note">इस सार्वजनिक कार्ड में मोबाइल नंबर, WhatsApp नंबर या PIN कोड दिखाई नहीं देता।</p>
+    </dialog>
+
+    <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
