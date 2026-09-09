@@ -28,6 +28,12 @@ const copy = {
     recordingError: "माइक्रोफ़ोन की अनुमति दें और फिर कोशिश करें।", processingError: "रिकॉर्डिंग को पढ़ा नहीं जा सका। फिर से कोशिश करें।",
     voiceError: "Hindi आवाज़ उपलब्ध नहीं है। अपनी device voice settings जाँचें।", missing: "यह जानकारी भरें।",
     ageError: "5 से 120 के बीच आयु भरें।", phoneError: "मान्य फ़ोन नंबर भरें।", emailError: "मान्य ईमेल भरें।", copied: "परिणाम कॉपी हो गया है।",
+    noMicFound: "कोई माइक्रोफ़ोन नहीं मिला। अपनी device settings जाँचें।",
+    serviceBlocked: "इस browser ने आवाज़ पहचान सेवा रोक दी है। Chrome या Edge पर कोशिश करें।",
+    networkError: "आवाज़ पहचान सेवा तक नहीं पहुँचा जा सका। इंटरनेट जाँचें और फिर कोशिश करें।",
+    langUnsupported: "इस browser में हिंदी आवाज़ पहचान उपलब्ध नहीं है। Chrome या Edge पर कोशिश करें।",
+    noSpeechHint: "अभी कुछ सुनाई नहीं दिया — माइक के पास थोड़ा तेज़ पढ़ें।",
+    stalled: "कोई आवाज़ पहचानी नहीं गई। माइक्रोफ़ोन जाँचें और फिर पढ़ें।",
   },
   en: {
     title: "Rajkamal Reader", motto: "Literature in your voice", newPassage: "New passage", listen: "Listen first", stopListen: "Stop listening",
@@ -43,6 +49,12 @@ const copy = {
     recordingError: "Allow microphone access and try again.", processingError: "We could not process this recording. Please try again.",
     voiceError: "A Hindi voice is unavailable. Check your device voice settings.", missing: "Complete this field.",
     ageError: "Enter an age from 5 to 120.", phoneError: "Enter a valid phone number.", emailError: "Enter a valid email.", copied: "Your result is copied and ready to share.",
+    noMicFound: "No microphone was found. Check your device settings.",
+    serviceBlocked: "This browser blocked the speech service. Try Chrome or Edge.",
+    networkError: "We could not reach the speech service. Check your internet connection and try again.",
+    langUnsupported: "Hindi speech recognition is unavailable in this browser. Try Chrome or Edge.",
+    noSpeechHint: "We can't hear you yet — read a little louder, closer to the mic.",
+    stalled: "We could not hear any reading. Check your microphone and read again.",
   },
 } as const;
 
@@ -147,6 +159,7 @@ export default function OpenReader({ passages }: Props) {
     active.onresult = (event) => {
       if (recognition.current !== active) return;
       recognitionRestartCount.current = 0;
+      setError("");
       let final = "";
       let interim = "";
       // Rebuild from the session results, so repeated events cannot duplicate words.
@@ -160,14 +173,23 @@ export default function OpenReader({ passages }: Props) {
     };
     active.onerror = (event) => {
       if (recognition.current !== active) return;
+      const code = event.error;
+      // Recoverable codes. A silent pause ("no-speech") and an interrupted
+      // session ("aborted") are routine mid-reading, so leave the session
+      // alive and let onend restart it instead of ending the recording.
+      if (code === "no-speech") { setError(t.noSpeechHint); return; }
+      if (code === "aborted") return;
+
       failed = true;
       if (recognitionRestartTimer.current) window.clearTimeout(recognitionRestartTimer.current);
       recognitionRestartTimer.current = null;
-      setError(event.error === "not-allowed" || event.error === "audio-capture"
-        ? t.recordingError
-        : language === "hi"
-          ? "आवाज़ पहचानी नहीं जा सकी। इंटरनेट जाँचें और फिर कोशिश करें।"
-          : "Speech recognition failed. Check your internet connection and try again.");
+      setError(
+        code === "not-allowed" ? t.recordingError
+          : code === "service-not-allowed" ? t.serviceBlocked
+            : code === "audio-capture" ? t.noMicFound
+              : code === "network" ? t.networkError
+                : code === "language-not-supported" ? t.langUnsupported
+                  : t.processingError);
       recognition.current = null;
       active.abort();
       setStatus("ready");
@@ -185,7 +207,7 @@ export default function OpenReader({ passages }: Props) {
       if (recognitionRestartCount.current > 3) {
         recognition.current = null;
         setStatus("ready");
-        setError(language === "hi" ? "आवाज़ पहचान बार-बार रुक रही है। इंटरनेट जाँचें और फिर कोशिश करें।" : "Speech recognition kept stopping. Check your internet connection and try again.");
+        setError(completedText.current ? t.processingError : t.stalled);
         return;
       }
       recognitionRestartTimer.current = window.setTimeout(() => {
