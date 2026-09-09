@@ -60,6 +60,10 @@ const copy = {
 
 const emptyScore: ReadingScore = { total: 0, accuracy: 0, fluency: 0, completion: 0, consistency: 0, wordsRead: 0, expectedWords: 0, wordsPerMinute: 0, xp: 0 };
 
+const micLog = (event: string, details: Record<string, unknown> = {}) => {
+  console.info(`[Rajkamal Reader][mic] ${event}`, { at: new Date().toISOString(), ...details });
+};
+
 export default function OpenReader({ passages }: Props) {
   const [language, setLanguage] = useState<Language>("hi");
   const [index, setIndex] = useState(0);
@@ -97,6 +101,7 @@ export default function OpenReader({ passages }: Props) {
   }, [recording]);
 
   useEffect(() => () => {
+    micLog("component cleanup");
     if (recognitionRestartTimer.current) window.clearTimeout(recognitionRestartTimer.current);
     const active = recognition.current;
     recognition.current = null;
@@ -111,7 +116,16 @@ export default function OpenReader({ passages }: Props) {
     window.speechSynthesis?.cancel();
   }, []);
 
-  function releaseMicrophone() {
+  function releaseMicrophone(reason = "unspecified") {
+    micLog("releasing media stream", {
+      reason,
+      tracks: microphoneStream.current?.getTracks().map((track) => ({
+        kind: track.kind,
+        enabled: track.enabled,
+        muted: track.muted,
+        readyState: track.readyState,
+      })) ?? [],
+    });
     microphoneStream.current?.getTracks().forEach((track) => track.stop());
     microphoneStream.current = null;
     microphoneStarting.current = false;
@@ -132,7 +146,7 @@ export default function OpenReader({ passages }: Props) {
     if (recognitionRestartTimer.current) window.clearTimeout(recognitionRestartTimer.current);
     recognitionRestartTimer.current = null;
     recognition.current = null;
-    releaseMicrophone();
+    releaseMicrophone("recognition finished");
     const duration = Math.max(1, Math.floor(((stoppedAt.current || Date.now()) - startedAt.current) / 1000));
     setSeconds(duration);
     if (!completedText.current) {
@@ -150,14 +164,33 @@ export default function OpenReader({ passages }: Props) {
     microphoneStarting.current = true;
     setError("");
     const API = window.SpeechRecognition || window.webkitSpeechRecognition;
+    micLog("start requested", {
+      recognitionSupported: Boolean(API),
+      mediaDevicesSupported: Boolean(navigator.mediaDevices?.getUserMedia),
+      visibilityState: document.visibilityState,
+      secureContext: window.isSecureContext,
+    });
     if (!API) { microphoneStarting.current = false; setStatus("unsupported"); return; }
 
     try {
       // Keep one media stream open for the full attempt. Chromium may end and
       // restart SpeechRecognition sessions during pauses, but the mic itself
       // should remain active until the reader presses Finish.
+      micLog("requesting browser microphone permission");
       microphoneStream.current = await navigator.mediaDevices.getUserMedia({ audio: true });
-    } catch {
+      const audioTracks = microphoneStream.current.getAudioTracks();
+      micLog("media stream acquired", {
+        active: microphoneStream.current.active,
+        tracks: audioTracks.map((track) => ({ enabled: track.enabled, muted: track.muted, readyState: track.readyState })),
+      });
+      audioTracks.forEach((track) => {
+        track.addEventListener("mute", () => micLog("media track muted", { readyState: track.readyState }));
+        track.addEventListener("unmute", () => micLog("media track unmuted", { readyState: track.readyState }));
+        track.addEventListener("ended", () => micLog("media track ended by browser/device", { readyState: track.readyState }));
+      });
+    } catch (caught) {
+      const permissionError = caught instanceof DOMException ? { name: caught.name, message: caught.message } : { value: String(caught) };
+      console.error("[Rajkamal Reader][mic] getUserMedia failed", permissionError);
       microphoneStarting.current = false;
       setStatus("ready");
       setError(t.recordingError);
@@ -167,7 +200,7 @@ export default function OpenReader({ passages }: Props) {
     // The component or another start attempt may have taken ownership while
     // the permission prompt was open.
     if (recognition.current) {
-      releaseMicrophone();
+      releaseMicrophone("duplicate start request");
       return;
     }
 
@@ -194,6 +227,14 @@ export default function OpenReader({ passages }: Props) {
       sessionFinal = "";
     };
 
+    active.onstart = () => micLog("speech recognition started", { restart: recognitionRestartCount.current });
+    active.onaudiostart = () => micLog("speech recognition audio capture started");
+    active.onaudioend = () => micLog("speech recognition audio capture ended");
+    active.onsoundstart = () => micLog("sound detected");
+    active.onsoundend = () => micLog("sound detection ended");
+    active.onspeechstart = () => micLog("speech detected");
+    active.onspeechend = () => micLog("speech detection ended");
+
     active.onresult = (event) => {
       if (recognition.current !== active) return;
       recognitionRestartCount.current = 0;
@@ -207,11 +248,18 @@ export default function OpenReader({ passages }: Props) {
         else interim += result[0].transcript + " ";
       }
       sessionFinal = final.trim();
+      micLog("recognition result", { finalCharacters: final.trim().length, interimCharacters: interim.trim().length });
       setTranscript(`${completedText.current} ${sessionFinal} ${interim}`.trim());
     };
     active.onerror = (event) => {
       if (recognition.current !== active) return;
       const code = event.error;
+      console.error("[Rajkamal Reader][mic] speech recognition error", {
+        at: new Date().toISOString(),
+        code,
+        stoppedByUser: Boolean(stoppedAt.current),
+        restart: recognitionRestartCount.current,
+      });
       // Recoverable codes. A silent pause ("no-speech") and an interrupted
       // session ("aborted") are routine mid-reading, so leave the session
       // alive and let onend restart it instead of ending the recording.
@@ -230,10 +278,16 @@ export default function OpenReader({ passages }: Props) {
                   : t.processingError);
       recognition.current = null;
       active.abort();
-      releaseMicrophone();
+      releaseMicrophone(`fatal recognition error: ${code}`);
       setStatus("ready");
     };
     active.onend = () => {
+      micLog("speech recognition ended", {
+        failed,
+        stoppedByUser: Boolean(stoppedAt.current),
+        restart: recognitionRestartCount.current,
+        streamActive: microphoneStream.current?.active ?? false,
+      });
       if (recognition.current !== active) return;
       if (failed) return;
       if (stoppedAt.current) {
@@ -247,17 +301,23 @@ export default function OpenReader({ passages }: Props) {
       recognitionRestartCount.current += 1;
       recognitionRestartTimer.current = window.setTimeout(() => {
         if (recognition.current !== active || stoppedAt.current) return;
-        try { active.start(); } catch { finishRecognition(active); }
+        micLog("restarting speech recognition", { restart: recognitionRestartCount.current });
+        try { active.start(); } catch (caught) {
+          console.error("[Rajkamal Reader][mic] recognition restart threw", caught);
+          finishRecognition(active);
+        }
       }, Math.min(250 * (2 ** (recognitionRestartCount.current - 1)), 1500));
     };
     try {
       active.start();
+      micLog("speech recognition start invoked");
       microphoneStarting.current = false;
       setStatus("recording");
-    } catch {
+    } catch (caught) {
+      console.error("[Rajkamal Reader][mic] recognition start threw", caught);
       recognition.current = null;
       active.abort();
-      releaseMicrophone();
+      releaseMicrophone("recognition start threw");
       setStatus("ready");
       setError(t.recordingError);
     }
@@ -267,6 +327,7 @@ export default function OpenReader({ passages }: Props) {
     const active = recognition.current;
     if (!active || stoppedAt.current) return;
     stoppedAt.current = Date.now();
+    micLog("finish requested by reader");
     setStatus("transcribing");
     // Wait for the final result and end event before scoring.
     try { active.stop(); } catch { finishRecognition(active); }
