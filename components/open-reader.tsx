@@ -27,6 +27,7 @@ type BrowserSpeechRecognition = {
   start(): void;
   stop(): void;
   abort(): void;
+  onstart: (() => void) | null;
   onresult: ((event: SpeechRecognitionResultEventLike) => void) | null;
   onerror: ((event: { error: string }) => void) | null;
   onend: (() => void) | null;
@@ -97,6 +98,13 @@ export default function OpenReader({ passages }: Props) {
   const [transcriptionStatus, setTranscriptionStatus] = useState("");
   const [transcriptSource, setTranscriptSource] = useState<TranscriptSource>("browser");
   const [isSaving, setIsSaving] = useState(false);
+  const [browserHint, setBrowserHint] = useState("");
+  const [recordingUrl, setRecordingUrl] = useState("");
+  const recordingUrlRef = useRef("");
+  const recognitionRestart = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const recognitionFinish = useRef<Promise<void>>(Promise.resolve());
+  const resolveRecognitionFinish = useRef<(() => void) | null>(null);
+  const recognitionRetries = useRef(0);
   const [details, setDetails] = useState<Details>({ name: "", age: "", phone: "", email: "", place: "", consent: false, leaderboardOptIn: false });
   const [errors, setErrors] = useState<Partial<Record<keyof Details, string>>>({});
   const mediaRecorder = useRef<MediaRecorder | null>(null);
@@ -126,6 +134,10 @@ export default function OpenReader({ passages }: Props) {
 
   useEffect(() => () => {
     micLog("component cleanup");
+    stoppedAt.current = Date.now();
+    if (recognitionRestart.current) clearTimeout(recognitionRestart.current);
+    if (recordingUrlRef.current) URL.revokeObjectURL(recordingUrlRef.current);
+    resolveRecognitionFinish.current?.();
     const recorder = mediaRecorder.current;
     mediaRecorder.current = null;
     if (recorder && recorder.state !== "inactive") {
@@ -174,31 +186,61 @@ export default function OpenReader({ passages }: Props) {
       webkitSpeechRecognition?: SpeechRecognitionConstructor;
     };
     const Recognition = speechWindow.SpeechRecognition ?? speechWindow.webkitSpeechRecognition;
-    if (!Recognition) return;
+    if (!Recognition) {
+      setBrowserHint(language === "hi" ? "लाइव पाठ उपलब्ध नहीं है। रिकॉर्डिंग से पाठ बनाया जाएगा।" : "Live text is unavailable. Your recording will still be transcribed.");
+      return;
+    }
 
     const recognition = new Recognition();
     browserRecognition.current = recognition;
-    browserFinalTranscript.current = "";
-    browserLatestTranscript.current = "";
+    const prefix = browserFinalTranscript.current;
+    let retryable = true;
+    recognitionFinish.current = new Promise<void>((resolve) => { resolveRecognitionFinish.current = resolve; });
+    const finish = resolveRecognitionFinish.current;
     recognition.lang = "hi-IN";
     recognition.continuous = true;
     recognition.interimResults = true;
     recognition.maxAlternatives = 1;
+    recognition.onstart = () => {
+      micLog("browser recognition listening");
+      setBrowserHint(language === "hi" ? "लाइव पाठ सुन रहा है…" : "Listening for live text…");
+    };
     recognition.onresult = (event) => {
+      if (browserRecognition.current !== recognition) return;
       let interim = "";
-      for (let item = event.resultIndex; item < event.results.length; item += 1) {
+      let final = prefix;
+      for (let item = 0; item < event.results.length; item += 1) {
         const result = event.results[item];
         const text = result[0]?.transcript?.trim() ?? "";
-        if (result.isFinal && text) browserFinalTranscript.current = `${browserFinalTranscript.current} ${text}`.trim();
+        if (result.isFinal && text) final = `${final} ${text}`.trim();
         else if (text) interim = `${interim} ${text}`.trim();
       }
-      browserLatestTranscript.current = `${browserFinalTranscript.current} ${interim}`.trim();
+      browserFinalTranscript.current = final;
+      browserLatestTranscript.current = `${final} ${interim}`.trim();
       setTranscript(browserLatestTranscript.current);
     };
-    recognition.onerror = (event) => micLog("browser speech recognition error", { error: event.error });
-    recognition.onend = () => { browserRecognition.current = null; };
+    recognition.onerror = (event) => {
+      micLog("browser speech recognition error", { error: event.error });
+      retryable = event.error === "no-speech";
+      setBrowserHint(event.error === "no-speech" ? t.noSpeechHint : event.error === "network" ? t.networkError : t.serviceBlocked);
+    };
+    recognition.onend = () => {
+      finish?.();
+      if (browserRecognition.current !== recognition) return;
+      browserRecognition.current = null;
+      if (!stoppedAt.current && mediaRecorder.current?.state === "recording" && retryable && recognitionRetries.current < 3) {
+        recognitionRetries.current += 1;
+        recognitionRestart.current = setTimeout(() => {
+          if (!stoppedAt.current && mediaRecorder.current?.state === "recording") startBrowserRecognition();
+        }, 300);
+      }
+    };
     try { recognition.start(); }
-    catch (caught) { micLog("browser speech recognition unavailable", { error: String(caught) }); }
+    catch (caught) {
+      finish?.(); browserRecognition.current = null;
+      setBrowserHint(t.serviceBlocked);
+      micLog("browser speech recognition unavailable", { error: String(caught) });
+    }
   }
 
   async function transcribeWithSpeechmatics(blob: Blob) {
@@ -206,8 +248,8 @@ export default function OpenReader({ passages }: Props) {
     const extension = blob.type.includes("mp4") ? "mp4" : blob.type.includes("ogg") ? "ogg" : "webm";
     body.append("audio", blob, `reading.${extension}`);
     const response = await fetch("/api/transcribe", { method: "POST", body });
-    const payload = await response.json() as { text?: string; error?: string };
-    if (!response.ok || !payload.text) throw new Error(payload.error || "Transcription failed.");
+    const payload = await response.json() as { text?: string; error?: string; code?: string; requestId?: string };
+    if (!response.ok || !payload.text) throw new Error(`${payload.error || "Transcription failed."} [${payload.code || response.status}${payload.requestId ? ` / ${payload.requestId}` : ""}]`);
     return payload.text.trim();
   }
 
@@ -256,6 +298,11 @@ export default function OpenReader({ passages }: Props) {
     startedAt.current = Date.now();
     attempts.current += 1;
     setTranscript("");
+    setBrowserHint("");
+    recognitionRetries.current = 0;
+    if (recordingUrlRef.current) URL.revokeObjectURL(recordingUrlRef.current);
+    recordingUrlRef.current = "";
+    setRecordingUrl("");
     browserFinalTranscript.current = "";
     browserLatestTranscript.current = "";
     setSeconds(0);
@@ -276,11 +323,19 @@ export default function OpenReader({ passages }: Props) {
       };
       recorder.onstop = async () => {
         mediaRecorder.current = null;
+        await Promise.race([recognitionFinish.current, new Promise<void>((resolve) => setTimeout(resolve, 1500))]);
+        if (browserRecognition.current) {
+          browserRecognition.current.onresult = null;
+          browserRecognition.current.abort();
+          browserRecognition.current = null;
+        }
         releaseMicrophone("recording completed");
         const duration = Math.max(1, Math.floor((stoppedAt.current - startedAt.current) / 1000));
         setSeconds(duration);
         try {
           const blob = new Blob(audioChunks.current, { type: recorder.mimeType || "audio/webm" });
+          recordingUrlRef.current = URL.createObjectURL(blob);
+          setRecordingUrl(recordingUrlRef.current);
           micLog("recording ready for Speechmatics transcription", { bytes: blob.size, mimeType: blob.type, duration });
           setTranscriptionStatus(language === "hi" ? "रिकॉर्डिंग का सुरक्षित ट्रांसक्रिप्शन हो रहा है…" : "Securely transcribing your recording…");
           const text = await transcribeWithSpeechmatics(blob);
@@ -300,7 +355,7 @@ export default function OpenReader({ passages }: Props) {
             setError(language === "hi" ? "सर्वर उपलब्ध नहीं था—यह browser का अनुमानित अभ्यास स्कोर है।" : "The server was unavailable—this is an unverified browser practice score.");
             setStatus("details");
           } else {
-            setError(t.processingError);
+            setError(caught instanceof Error ? caught.message : t.processingError);
             setStatus("ready");
           }
         }
@@ -325,6 +380,7 @@ export default function OpenReader({ passages }: Props) {
     stoppedAt.current = Date.now();
     micLog("finish requested by reader");
     setStatus("transcribing");
+    if (recognitionRestart.current) clearTimeout(recognitionRestart.current);
     browserRecognition.current?.stop();
     recorder.stop();
   }
@@ -457,6 +513,8 @@ export default function OpenReader({ passages }: Props) {
             <div className="padhaku-record-copy"><strong>{statusTitle}</strong><span>{statusHelp}</span></div>
             <div className="padhaku-record-actions"><span><Timer className="size-4" />{elapsed}</span>{recording ? <button onClick={finishRecording} className="recording"><Mic className="size-4" />{t.finish}</button> : <button onClick={startRecording} disabled={status === "transcribing"}><Play className="size-4 fill-current" />{t.start}</button>}</div>
             {recording && <div className="padhaku-wave">{Array.from({ length: 18 }).map((_, item) => <i key={item} className="audio-bar" style={{ height: `${20 + ((item * 23) % 65)}%` }} />)}</div>}
+            {recording && <p className="padhaku-error" translate="no">{transcript || browserHint}</p>}
+            {recordingUrl && !recording && <div className="col-span-full"><p>{language === "hi" ? "अपनी रिकॉर्डिंग सुनें" : "Listen to your recording"}</p><audio controls src={recordingUrl} className="w-full" /></div>}
             {error && <p className="padhaku-error"><Info className="size-4" />{error}</p>}
           </section>
         </article>

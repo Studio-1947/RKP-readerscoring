@@ -31,7 +31,7 @@ function providerError(payload: JobResponse, fallback: string) {
 }
 
 export async function POST(request: Request) {
-  const apiKey = process.env.SPEECHMATICS_API_KEY;
+  const apiKey = process.env.SPEECHMATICS_API_KEY?.trim();
   if (!apiKey) {
     return Response.json({ error: "Transcription service is not configured." }, { status: 503 });
   }
@@ -61,6 +61,10 @@ export async function POST(request: Request) {
 
   const headers = { Authorization: `Bearer ${apiKey}` };
   let jobId = "";
+  const requestId = crypto.randomUUID();
+  const signal = AbortSignal.timeout(JOB_TIMEOUT_MS);
+  let stage = "submit";
+  let upstreamStatus = 0;
 
   try {
     const providerBody = new FormData();
@@ -77,7 +81,9 @@ export async function POST(request: Request) {
       headers,
       body: providerBody,
       cache: "no-store",
+      signal,
     });
+    upstreamStatus = submitted.status;
     const submittedPayload = await submitted.json() as JobResponse;
     if (!submitted.ok) throw new Error(providerError(submittedPayload, "Speechmatics rejected the recording."));
     jobId = submittedPayload.id || submittedPayload.job?.id || "";
@@ -85,12 +91,15 @@ export async function POST(request: Request) {
 
     const deadline = Date.now() + JOB_TIMEOUT_MS;
     let completed = false;
+    stage = "poll";
     while (Date.now() < deadline) {
       await wait(POLL_INTERVAL_MS);
       const statusResponse = await fetch(`${SPEECHMATICS_BASE_URL}/jobs/${encodeURIComponent(jobId)}`, {
         headers,
         cache: "no-store",
+        signal,
       });
+      upstreamStatus = statusResponse.status;
       const statusPayload = await statusResponse.json() as JobResponse;
       if (!statusResponse.ok) throw new Error(providerError(statusPayload, "Unable to read transcription status."));
       const status = statusPayload.job?.status;
@@ -100,31 +109,36 @@ export async function POST(request: Request) {
 
     if (!completed) throw new Error("Transcription timed out.");
 
+    stage = "transcript";
     const transcriptResponse = await fetch(
       `${SPEECHMATICS_BASE_URL}/jobs/${encodeURIComponent(jobId)}/transcript?format=txt`,
-      { headers: { ...headers, Accept: "text/plain" }, cache: "no-store" },
+      { headers: { ...headers, Accept: "text/plain" }, cache: "no-store", signal },
     );
+    upstreamStatus = transcriptResponse.status;
     if (!transcriptResponse.ok) throw new Error("Unable to retrieve the completed transcript.");
     const text = (await transcriptResponse.text()).trim();
     if (!text) throw new Error("No speech was recognized.");
 
     return Response.json({ text, source: "speechmatics" });
   } catch (caught) {
-    console.error("[Rajkamal Reader][speechmatics] transcription failed", caught);
+    console.error("[Rajkamal Reader][speechmatics] transcription failed", { requestId, stage, upstreamStatus, bytes: audio.size, mimeType: audio.type, error: caught });
     const message = caught instanceof Error ? caught.message : String(caught);
     const noSpeech = message === "No speech was recognized.";
+    const timedOut = signal.aborted || message === "Transcription timed out.";
     return Response.json(
       {
-        error: noSpeech ? "No speech was detected in the recording." : "Transcription service could not process this recording.",
-        code: noSpeech ? "NO_SPEECH" : "PROVIDER_ERROR",
+        error: noSpeech ? "No speech was detected in the recording." : timedOut ? "Transcription timed out. Please try a shorter recording." : "Transcription service could not process this recording.",
+        code: noSpeech ? "NO_SPEECH" : timedOut ? "PROVIDER_TIMEOUT" : `PROVIDER_${stage.toUpperCase()}_${upstreamStatus || "NETWORK"}`,
+        requestId,
       },
-      { status: noSpeech ? 422 : 502 },
+      { status: noSpeech ? 422 : timedOut ? 504 : 502 },
     );
   } finally {
     if (jobId) {
       await fetch(`${SPEECHMATICS_BASE_URL}/jobs/${encodeURIComponent(jobId)}`, {
         method: "DELETE",
         headers,
+        signal: AbortSignal.timeout(3_000),
       }).catch(() => undefined);
     }
   }
