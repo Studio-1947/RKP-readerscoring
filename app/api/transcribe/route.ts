@@ -23,6 +23,18 @@ type JobResponse = {
 
 const wait = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
+// Speechmatics answers auth failures with an nginx HTML page, so `.json()` would throw
+// and mask the real upstream status behind a parse error.
+async function readJobResponse(response: Response): Promise<JobResponse> {
+  const raw = await response.text();
+  if (!raw) return {};
+  try {
+    return JSON.parse(raw) as JobResponse;
+  } catch {
+    return { detail: raw.slice(0, 300) };
+  }
+}
+
 function providerError(payload: JobResponse, fallback: string) {
   return payload.job?.errors?.map((error) => error.message).filter(Boolean).join("; ")
     || payload.detail
@@ -67,8 +79,16 @@ export async function POST(request: Request) {
   let upstreamStatus = 0;
 
   try {
+    // Forward a fully materialized copy of the audio. Re-appending the `File` that
+    // `request.formData()` returns leaves the outbound multipart part empty on some
+    // serverless runtimes, and an empty `data_file` is exactly what Speechmatics
+    // rejects with a 400 ("data_file is too small for valid audio, size: 0").
+    const audioBytes = new Uint8Array(await audio.arrayBuffer());
+    if (!audioBytes.byteLength) throw new Error("Recording body was empty after parsing.");
+    const providerFile = new Blob([audioBytes], { type: normalizedType || "audio/webm" });
+
     const providerBody = new FormData();
-    providerBody.append("data_file", audio, audio.name || "reading.webm");
+    providerBody.append("data_file", providerFile, audio.name || "reading.webm");
     providerBody.append("config", JSON.stringify({
       type: "transcription",
       transcription_config: {
@@ -84,7 +104,7 @@ export async function POST(request: Request) {
       signal,
     });
     upstreamStatus = submitted.status;
-    const submittedPayload = await submitted.json() as JobResponse;
+    const submittedPayload = await readJobResponse(submitted);
     if (!submitted.ok) throw new Error(providerError(submittedPayload, "Speechmatics rejected the recording."));
     jobId = submittedPayload.id || submittedPayload.job?.id || "";
     if (!jobId) throw new Error("Speechmatics did not return a job ID.");
@@ -100,7 +120,7 @@ export async function POST(request: Request) {
         signal,
       });
       upstreamStatus = statusResponse.status;
-      const statusPayload = await statusResponse.json() as JobResponse;
+      const statusPayload = await readJobResponse(statusResponse);
       if (!statusResponse.ok) throw new Error(providerError(statusPayload, "Unable to read transcription status."));
       const status = statusPayload.job?.status;
       if (status === "rejected") throw new Error(providerError(statusPayload, "Speechmatics could not transcribe the recording."));
@@ -129,6 +149,9 @@ export async function POST(request: Request) {
       {
         error: noSpeech ? "No speech was detected in the recording." : timedOut ? "Transcription timed out. Please try a shorter recording." : "Transcription service could not process this recording.",
         code: noSpeech ? "NO_SPEECH" : timedOut ? "PROVIDER_TIMEOUT" : `PROVIDER_${stage.toUpperCase()}_${upstreamStatus || "NETWORK"}`,
+        // The upstream message is a format/validation string, never credentials — carrying
+        // it through keeps a failure diagnosable from the browser console alone.
+        detail: noSpeech || timedOut ? undefined : message,
         requestId,
       },
       { status: noSpeech ? 422 : timedOut ? 504 : 502 },
