@@ -105,7 +105,7 @@ export function ReaderDashboard({ view, hindi, refresh, onPractice }: {
       </div>
       <div className="dashboard-card">
         <div className="card-heading"><h2>{hindi ? "सभी पाठक" : "All readers"}</h2><button onClick={() => downloadCsv("rajkamal-leaderboard.csv", [["Rank", "Reader", "Best score"], ...leaders.map((row, index) => [index + 1, row.reader_label, row.best_score])])}><Download />{hindi ? "डाउनलोड" : "Download"}</button></div>
-        {!leaders.length ? <Empty hindi={hindi} onPractice={onPractice} /> : <ol className="leader-list">{leaders.map((row, index) => <li key={row.reader_label}><span className="rank">#{index + 1}</span><span className="avatar">{row.reader_label.at(-1)}</span><strong>{row.reader_label}</strong><b>{row.best_score}<small>/100</small></b></li>)}</ol>}
+        {!leaders.length ? <Empty hindi={hindi} onPractice={onPractice} /> : <ol className="leader-list">{leaders.map((row, index) => <li key={`${index}-${row.reader_label}`}><span className="rank">#{index + 1}</span><span className="avatar">{row.reader_label.charAt(0).toUpperCase()}</span><strong>{row.reader_label}</strong><b>{row.best_score}<small>/100</small></b></li>)}</ol>}
       </div>
     </section>;
   }

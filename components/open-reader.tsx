@@ -7,12 +7,14 @@ import { ReaderDashboard } from "@/components/reader-dashboard";
 import { Info, Languages, Mic, Play, RotateCcw, Share2, Timer, Volume2, X } from "lucide-react";
 import { ReadingScore, scoreReading } from "@/lib/scoring";
 import { saveReaderAttempt } from "@/lib/reader-storage";
+import { createClient } from "@/utils/supabase/client";
 
 type Language = "hi" | "en";
 type View = "practice" | "leaderboard" | "progress";
 type Status = "ready" | "recording" | "transcribing" | "details" | "result" | "unsupported";
 type Passage = { id: string; sequence: number; title: string; difficulty_editorial: string; lines: string[]; reference_text: string; word_count_whitespace: number };
 type Details = { name: string; age: string; phone: string; email: string; place: string; consent: boolean; leaderboardOptIn: boolean };
+type Leader = { reader_label: string; best_score: number };
 type Props = { passages: Passage[] };
 type TranscriptSource = "browser" | "server";
 type SpeechRecognitionResultEventLike = {
@@ -107,6 +109,7 @@ export default function OpenReader({ passages }: Props) {
   const recognitionRetries = useRef(0);
   const [details, setDetails] = useState<Details>({ name: "", age: "", phone: "", email: "", place: "", consent: false, leaderboardOptIn: false });
   const [errors, setErrors] = useState<Partial<Record<keyof Details, string>>>({});
+  const [topLeaders, setTopLeaders] = useState<Leader[]>([]);
   const mediaRecorder = useRef<MediaRecorder | null>(null);
   const microphoneStream = useRef<MediaStream | null>(null);
   const microphoneStarting = useRef(false);
@@ -131,6 +134,20 @@ export default function OpenReader({ passages }: Props) {
     const timer = window.setInterval(() => setSeconds(Math.floor((Date.now() - startedAt.current) / 1000)), 500);
     return () => window.clearInterval(timer);
   }, [recording]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadLeaders() {
+      try {
+        const { data } = await createClient().rpc("practice_leaderboard");
+        if (!cancelled) setTopLeaders((data ?? []).slice(0, 3));
+      } catch {
+        if (!cancelled) setTopLeaders([]);
+      }
+    }
+    void loadLeaders();
+    return () => { cancelled = true; };
+  }, [status]);
 
   useEffect(() => () => {
     micLog("component cleanup");
@@ -523,7 +540,7 @@ export default function OpenReader({ passages }: Props) {
           </section>
         </article>
         <aside className="padhaku-side">
-          <section className="padhaku-leader"><div className="padhaku-side-title"><div><p>{language === "hi" ? "इस हफ्ते" : "THIS WEEK"}</p><h2>{language === "hi" ? "लीडरबोर्ड" : "Leaderboard"}</h2></div><Info className="size-5" /></div><div className="padhaku-ranks"><p><span>1</span><strong>{language === "hi" ? "रीडर 01" : "Reader 01"}</strong><b>94</b></p><p><span>2</span><strong>{language === "hi" ? "रीडर 02" : "Reader 02"}</strong><b>87</b></p><p><span>3</span><strong>{language === "hi" ? "रीडर 03" : "Reader 03"}</strong><b>81</b></p></div><button onClick={() => setActiveView("leaderboard")}>{language === "hi" ? "पूरी सूची देखें →" : "View full leaderboard →"}</button></section>
+          <section className="padhaku-leader"><div className="padhaku-side-title"><div><p>{language === "hi" ? "इस हफ्ते" : "THIS WEEK"}</p><h2>{language === "hi" ? "लीडरबोर्ड" : "Leaderboard"}</h2></div><Info className="size-5" /></div><div className="padhaku-ranks">{topLeaders.length ? topLeaders.map((row, i) => <p key={`${i}-${row.reader_label}`}><span>{i + 1}</span><strong>{row.reader_label}</strong><b>{row.best_score}</b></p>) : <p className="padhaku-ranks-empty">{language === "hi" ? "अभी कोई सत्यापित स्कोर नहीं है।" : "No verified scores yet."}</p>}</div><button onClick={() => setActiveView("leaderboard")}>{language === "hi" ? "पूरी सूची देखें →" : "View full leaderboard →"}</button></section>
           <section className="padhaku-streak"><p>{language === "hi" ? "राजकमल रीडिंग रिवार्ड्स" : "RAJKAMAL READING REWARDS"}</p><div><h2>{language === "hi" ? "अपनी रीडिंग स्ट्रीक बनाएँ" : "Build your reading streak"}</h2><span>🔥</span></div><i><b /></i><p>{language === "hi" ? "हर दिन एक नया पाठ पढ़ें और अपनी प्रगति देखें।" : "Read a new passage every day and follow your progress."}</p><button onClick={() => setActiveView("progress")}>{language === "hi" ? "अपनी प्रगति देखें →" : "View your progress →"}</button></section>
           <ScoreGuide hindi={language === "hi"} />
         </aside>
@@ -547,7 +564,7 @@ export default function OpenReader({ passages }: Props) {
                 <FormField label={t.email} error={errors.email}><input value={details.email} onChange={(event) => setDetails({ ...details, email: event.target.value })} autoComplete="email" type="email" className={field} /></FormField>
                 <div className="sm:col-span-2"><FormField label={t.place} error={errors.place}><input value={details.place} onChange={(event) => setDetails({ ...details, place: event.target.value })} autoComplete="address-level2" className={field} /></FormField></div>
                 <label className="flex items-start gap-3 rounded-xl border border-[#eadabb] bg-white px-4 py-3 text-xs leading-5 text-stone-600 sm:col-span-2"><input checked={details.consent} onChange={(event) => setDetails({ ...details, consent: event.target.checked })} type="checkbox" className="mt-0.5 size-4 accent-[#b42332]" /><span>{t.consent}{errors.consent && <strong className="mt-1 block text-[#b42332]">{errors.consent}</strong>}</span></label>
-                <label className="flex items-start gap-3 text-xs leading-5 text-stone-600 sm:col-span-2"><input type="checkbox" disabled={transcriptSource !== "server"} checked={transcriptSource === "server" && details.leaderboardOptIn} onChange={event => setDetails({ ...details, leaderboardOptIn: event.target.checked })} className="mt-0.5 size-4 accent-[#b42332] disabled:opacity-40" /><span>{transcriptSource !== "server" ? (language === "hi" ? "Browser के अनुमानित स्कोर को leaderboard में शामिल नहीं किया जा सकता।" : "Unverified browser scores cannot be added to the leaderboard.") : (language === "hi" ? "अपना सर्वश्रेष्ठ स्कोर सूची में दिखाएँ। केवल एक अनाम Reader पहचान दिखेगी।" : "Show my best score on the leaderboard under an anonymous Reader label.")}</span></label>
+                <label className="flex items-start gap-3 text-xs leading-5 text-stone-600 sm:col-span-2"><input type="checkbox" disabled={transcriptSource !== "server"} checked={transcriptSource === "server" && details.leaderboardOptIn} onChange={event => setDetails({ ...details, leaderboardOptIn: event.target.checked })} className="mt-0.5 size-4 accent-[#b42332] disabled:opacity-40" /><span>{transcriptSource !== "server" ? (language === "hi" ? "Browser के अनुमानित स्कोर को leaderboard में शामिल नहीं किया जा सकता।" : "Unverified browser scores cannot be added to the leaderboard.") : (language === "hi" ? "अपना सर्वश्रेष्ठ स्कोर सूची में दिखाएँ। आपका पहला नाम लीडरबोर्ड पर दिखेगा।" : "Show my best score on the leaderboard. My first name will be shown publicly.")}</span></label>
                 <p className="text-xs leading-5 text-stone-500 sm:col-span-2"><Info className="mr-1 inline size-3.5" />{t.privacy}</p>
               </div>
             </div>
