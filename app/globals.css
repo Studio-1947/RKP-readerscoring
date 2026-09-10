@@ -131,3 +131,43 @@ main { overflow-wrap: anywhere; }
   .flip-word-item { animation: none; opacity: 1; transform: none; }
   .flip-word-delayed { display: none; }
 }
+
+/* Padhaku reference layout, adapted to the live Rajkamal reader. */
+.padhaku-shell { background: radial-gradient(circle at 0 0, #ffe1e3 0, transparent 28rem), #faf6f6; }
+.padhaku-practice { width: min(1120px, calc(100% - 40px)); margin: 0 auto; padding: 44px 0 0; }
+.padhaku-intro { display: flex; align-items: end; justify-content: space-between; gap: 28px; max-width: none; margin-bottom: 30px; }
+.padhaku-eyebrow, .padhaku-title-row p, .padhaku-side-title p, .padhaku-streak > p:first-child { margin: 0 0 5px; color: #c91e2b; text-transform: uppercase; letter-spacing: .09em; font-size: .77rem; font-weight: 900; }
+.padhaku-intro h1 { margin: 0; font-size: clamp(1.8rem, 3.1vw, 2.45rem); line-height: 1.25; letter-spacing: -.035em; }
+.padhaku-intro > div > p:last-child { margin: 7px 0 0; color: #756366; line-height: 1.65; }
+.padhaku-new { display: inline-flex; align-items: center; gap: 8px; flex: 0 0 auto; border: 1px solid #ddb7bc; border-radius: 999px; background: white; padding: 9px 16px; color: #9f1420; font-weight: 800; cursor: pointer; }
+.padhaku-grid { display: grid; grid-template-columns: minmax(0, 1.85fr) minmax(270px, .65fr); gap: 28px; align-items: start; }
+.padhaku-card, .padhaku-leader { overflow: hidden; border: 1px solid #efdddd; border-radius: 20px; background: white; box-shadow: 0 8px 28px rgba(75,24,30,.06); }
+.padhaku-card-head { padding: 18px 24px 13px; border-bottom: 1px solid #f5d3d6; background: #fff0f1; }
+.padhaku-card-head > div { display: flex; justify-content: space-between; gap: 16px; color: #c91e2b; font-size: .78rem; font-weight: 800; }
+.padhaku-card-head .padhaku-level { color: #257052; }
+.padhaku-card-head > i, .padhaku-streak > i { display: block; height: 5px; overflow: hidden; margin-top: 11px; border-radius: 10px; background: #f3cdd1; }
+.padhaku-card-head > i b, .padhaku-streak > i b { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #c91e2b, #ef6772); }
+.padhaku-title-row { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 26px 28px 12px; }
+.padhaku-title-row h2 { margin: 0; font-size: clamp(1.55rem, 3vw, 2.25rem); letter-spacing: -.035em; }
+.padhaku-title-row button { display: inline-flex; align-items: center; gap: 9px; border: 0; border-radius: 999px; background: #fff0f1; padding: 8px 14px 8px 8px; color: #9f1420; font-size: .8rem; font-weight: 800; cursor: pointer; }
+.padhaku-title-row button > span { display: grid; width: 30px; height: 30px; place-items: center; border-radius: 50%; color: white; background: #c91e2b; }
+.padhaku-title-row button.speaking { background: #fff3be; }
+.padhaku-passage { padding: 12px 28px 22px; font-family: "Noto Serif Devanagari", "Kohinoor Devanagari", serif; font-size: clamp(1.08rem, 1.8vw, 1.25rem); line-height: 1.8; }
+.padhaku-passage p { margin: 0 0 8px; }
+.padhaku-passage p:first-child::first-letter { float: left; margin: .18em .08em 0 0; color: #c91e2b; font-size: 2.3em; font-weight: 900; line-height: .7; }
+.padhaku-meta { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 28px 22px; }
+.padhaku-meta span { border: 1px solid #efdddd; border-radius: 999px; padding: 5px 10px; color: #756366; font-size: .73rem; font-weight: 700; }
+.padhaku-record { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 14px 20px; margin: 0 16px 16px; padding: 17px 18px; border-radius: 20px; color: white; background: linear-gradient(120deg, #961320, #c91e2b 55%, #d82b39); box-shadow: inset 0 1px rgba(255,255,255,.2); }
+.padhaku-record-copy strong, .padhaku-record-copy span { display: block; }.padhaku-record-copy strong { font-size: .96rem; }.padhaku-record-copy span { margin-top: 4px; color: #ffe4e7; font-size: .75rem; }
+.padhaku-record-actions { display: flex; align-items: center; gap: 12px; }.padhaku-record-actions > span { display: flex; align-items: center; gap: 5px; color: #ffe4e7; font-variant-numeric: tabular-nums; font-size: .88rem; }
+.padhaku-record-actions button { display: inline-flex; min-height: 46px; align-items: center; gap: 8px; border: 0; border-radius: 999px; padding: 9px 17px; color: #301719; background: #ffd84d; font-weight: 900; cursor: pointer; box-shadow: 0 6px 14px rgba(82,12,22,.26); }
+.padhaku-record-actions button.recording { background: #ffd9dd; }.padhaku-record-actions button:disabled { cursor: wait; opacity: .6; }
+.padhaku-wave { grid-column: 1 / -1; display: flex; height: 26px; align-items: center; justify-content: center; gap: 6px; }.padhaku-wave i { width: 3px; border-radius: 99px; background: #ffd84d; }
+.padhaku-error { grid-column: 1 / -1; display: flex; align-items: center; gap: 7px; margin: 0; color: #fff0b8; font-size: .78rem; }
+.padhaku-side { display: grid; gap: 16px; }.padhaku-leader { padding: 20px; }.padhaku-side-title { display: flex; align-items: center; justify-content: space-between; }.padhaku-side-title h2 { margin: 0; font-size: 1.45rem; }
+.padhaku-ranks { margin: 18px 0 12px; border-block: 1px solid #efdddd; }.padhaku-ranks p { display: grid; grid-template-columns: 24px 1fr auto; align-items: center; gap: 10px; margin: 0; padding: 12px 0; border-bottom: 1px solid #efdddd; }.padhaku-ranks p:last-child { border: 0; }.padhaku-ranks span { color: #756366; font-size: .8rem; font-weight: 700; }.padhaku-ranks strong { font-size: .88rem; }.padhaku-ranks b { color: #c91e2b; font-size: .88rem; }
+.padhaku-leader > button, .padhaku-streak button { width: 100%; border: 0; background: transparent; color: #c91e2b; font-size: .8rem; font-weight: 900; cursor: pointer; }
+.padhaku-streak { padding: 18px; border-radius: 20px; color: white; background: linear-gradient(145deg, #86111c, #c91e2b); box-shadow: 0 14px 34px rgba(100,17,28,.2); }.padhaku-streak > p:first-child { color: #ffd6da; }.padhaku-streak > div { display: flex; justify-content: space-between; gap: 12px; }.padhaku-streak h2 { margin: 0; font-size: 1.12rem; }.padhaku-streak > i { height: 8px; margin: 17px 0 12px; background: rgba(255,255,255,.2); }.padhaku-streak > i b { width: 24%; background: #ffd84d; }.padhaku-streak > p:not(:first-child) { margin: 0; color: #ffe7e9; font-size: .8rem; line-height: 1.6; }.padhaku-streak button { margin-top: 8px; color: #ffd84d; text-align: left; }
+.padhaku-side details { margin-top: 0; border-color: #efdddd; border-radius: 20px; box-shadow: 0 8px 28px rgba(75,24,30,.04); }
+@media (max-width: 860px) { .padhaku-practice { width: min(100% - 28px, 680px); padding-top: 28px; }.padhaku-grid { grid-template-columns: 1fr; }.padhaku-intro { align-items: stretch; flex-direction: column; }.padhaku-new { align-self: start; } }
+@media (max-width: 560px) { .padhaku-practice { width: calc(100% - 20px); padding-top: 22px; }.padhaku-intro { margin-bottom: 22px; }.padhaku-intro h1 { font-size: 1.65rem; }.padhaku-card { border-radius: 20px; }.padhaku-card-head { padding: 15px 17px 11px; }.padhaku-title-row { align-items: end; padding: 21px 18px 9px; }.padhaku-title-row button { padding: 7px; font-size: 0; }.padhaku-passage { padding: 10px 18px 17px; font-size: 1.08rem; line-height: 1.75; }.padhaku-meta { padding: 0 18px 17px; }.padhaku-record { grid-template-columns: 1fr; margin: 0 10px 10px; padding: 15px; }.padhaku-record-actions { justify-content: space-between; }.padhaku-record-actions button { flex: 1; justify-content: center; }.padhaku-wave, .padhaku-error { grid-column: 1; } }
