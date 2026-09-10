@@ -4,7 +4,7 @@ import { FormEvent, useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import { ScoreGuide } from "@/components/reading-context";
 import { ReaderDashboard } from "@/components/reader-dashboard";
-import { BookOpen, Info, Languages, Mic, MicOff, Play, RotateCcw, Share2, Timer, Volume2 } from "lucide-react";
+import { Info, Languages, Mic, Play, RotateCcw, Share2, Timer, Volume2 } from "lucide-react";
 import { ReadingScore, scoreReading } from "@/lib/scoring";
 import { saveReaderAttempt } from "@/lib/reader-storage";
 
@@ -14,6 +14,24 @@ type Status = "ready" | "recording" | "transcribing" | "details" | "result" | "u
 type Passage = { id: string; sequence: number; title: string; difficulty_editorial: string; lines: string[]; reference_text: string; word_count_whitespace: number };
 type Details = { name: string; age: string; phone: string; email: string; place: string; consent: boolean; leaderboardOptIn: boolean };
 type Props = { passages: Passage[] };
+type TranscriptSource = "browser" | "server";
+type SpeechRecognitionResultEventLike = {
+  resultIndex: number;
+  results: ArrayLike<{ isFinal: boolean; 0: { transcript: string } }>;
+};
+type BrowserSpeechRecognition = {
+  lang: string;
+  continuous: boolean;
+  interimResults: boolean;
+  maxAlternatives: number;
+  start(): void;
+  stop(): void;
+  abort(): void;
+  onresult: ((event: SpeechRecognitionResultEventLike) => void) | null;
+  onerror: ((event: { error: string }) => void) | null;
+  onend: (() => void) | null;
+};
+type SpeechRecognitionConstructor = new () => BrowserSpeechRecognition;
 
 const copy = {
   hi: {
@@ -23,7 +41,7 @@ const copy = {
     profileTag: "स्कोर अनलॉक करें", profileTitle: "अपना विस्तृत स्कोर देखें", profileHelp: "अपनी accuracy, pace और passage coverage देखने के लिए ये विवरण भरें।",
     name: "पूरा नाम", age: "आयु", phone: "फ़ोन नंबर", email: "ईमेल (वैकल्पिक)", place: "शहर / स्थान",
     consent: "मैं सहमत हूँ कि राजकमल मेरे स्कोर के लिए ये विवरण इस्तेमाल कर सकता है।",
-    privacy: "आपकी आवाज़ इसी device पर लिखित पाठ में बदली जाती है। यह ऐप सहमति के बाद आपके विवरण, पहचाना गया पाठ और स्कोर सहेजता है।",
+    privacy: "आपकी रिकॉर्डिंग सुरक्षित ट्रांसक्रिप्शन सेवा को भेजी जाती है और काम पूरा होते ही हटाने का अनुरोध किया जाता है। यह ऐप सहमति के बाद आपके विवरण, पहचाना गया पाठ और स्कोर सहेजता है।",
     view: "मेरा स्कोर देखें", saving: "सहेजा जा रहा है…", result: "आपका परिणाम", great: "आपका पाठ पूरा हुआ", score: "कुल स्कोर",
     accuracy: "शुद्धता", fluency: "प्रवाह", completion: "पूर्णता", speed: "गति", retry: "फिर पढ़ें", share: "परिणाम शेयर करें",
     unsupported: "इस browser में audio recording उपलब्ध नहीं है। नया Chrome, Edge, Firefox या Safari इस्तेमाल करें।",
@@ -44,7 +62,7 @@ const copy = {
     profileTag: "UNLOCK YOUR SCORE", profileTitle: "See your reading breakdown", profileHelp: "Complete these details to unlock your accuracy, pace and passage-coverage metrics.",
     name: "Full name", age: "Age", phone: "Phone number", email: "Email (optional)", place: "City / place",
     consent: "I agree that Rajkamal may use these details for my score.",
-    privacy: "Your recording is transcribed on this device. This app saves your details, recognized text and score after consent.",
+    privacy: "Your recording is sent to a secure transcription service and deletion is requested after processing. This app saves your details, recognized text and score after consent.",
     view: "View my score", saving: "Saving…", result: "YOUR RESULT", great: "Your reading is complete", score: "TOTAL SCORE",
     accuracy: "Accuracy", fluency: "Fluency", completion: "Completion", speed: "Speed", retry: "Read again", share: "Share result",
     unsupported: "Audio recording is unavailable in this browser. Use a current version of Chrome, Edge, Firefox, or Safari.",
@@ -66,24 +84,6 @@ const micLog = (event: string, details: Record<string, unknown> = {}) => {
   console.info(`[Rajkamal Reader][mic] ${event}`, { at: new Date().toISOString(), ...details });
 };
 
-async function decodeAudio(blob: Blob) {
-  const context = new AudioContext();
-  try {
-    const decoded = await context.decodeAudioData(await blob.arrayBuffer());
-    const sampleRate = 16_000;
-    const outputLength = Math.ceil(decoded.duration * sampleRate);
-    const offline = new OfflineAudioContext(1, outputLength, sampleRate);
-    const source = offline.createBufferSource();
-    source.buffer = decoded;
-    source.connect(offline.destination);
-    source.start();
-    const rendered = await offline.startRendering();
-    return rendered.getChannelData(0).slice();
-  } finally {
-    await context.close();
-  }
-}
-
 export default function OpenReader({ passages }: Props) {
   const [language, setLanguage] = useState<Language>("hi");
   const [activeView, setActiveView] = useState<View>("practice");
@@ -95,6 +95,7 @@ export default function OpenReader({ passages }: Props) {
   const [error, setError] = useState("");
   const [samplePlaying, setSamplePlaying] = useState(false);
   const [transcriptionStatus, setTranscriptionStatus] = useState("");
+  const [transcriptSource, setTranscriptSource] = useState<TranscriptSource>("browser");
   const [isSaving, setIsSaving] = useState(false);
   const [details, setDetails] = useState<Details>({ name: "", age: "", phone: "", email: "", place: "", consent: false, leaderboardOptIn: false });
   const [errors, setErrors] = useState<Partial<Record<keyof Details, string>>>({});
@@ -102,7 +103,8 @@ export default function OpenReader({ passages }: Props) {
   const microphoneStream = useRef<MediaStream | null>(null);
   const microphoneStarting = useRef(false);
   const audioChunks = useRef<Blob[]>([]);
-  const transcriptionWorker = useRef<Worker | null>(null);
+  const browserRecognition = useRef<BrowserSpeechRecognition | null>(null);
+  const browserFinalTranscript = useRef("");
   const stoppedAt = useRef(0);
   const listeningToken = useRef(0);
   const listening = useRef(false);
@@ -133,8 +135,8 @@ export default function OpenReader({ passages }: Props) {
     }
     microphoneStream.current?.getTracks().forEach((track) => track.stop());
     microphoneStream.current = null;
-    transcriptionWorker.current?.terminate();
-    transcriptionWorker.current = null;
+    browserRecognition.current?.abort();
+    browserRecognition.current = null;
     window.speechSynthesis?.cancel();
   }, []);
 
@@ -154,7 +156,8 @@ export default function OpenReader({ passages }: Props) {
   }
 
   function resetAttempt() {
-    setStatus("ready"); setSeconds(0); setTranscript(""); setScore(emptyScore); setError(""); setErrors({}); setTranscriptionStatus("");
+    setStatus("ready"); setSeconds(0); setTranscript(""); setScore(emptyScore); setError(""); setErrors({}); setTranscriptionStatus(""); setTranscriptSource("browser");
+    browserFinalTranscript.current = "";
   }
 
   function nextPassage() {
@@ -163,22 +166,45 @@ export default function OpenReader({ passages }: Props) {
     resetAttempt();
   }
 
-  function transcribeLocally(audio: Float32Array) {
-    return new Promise<string>((resolve, reject) => {
-      const worker = transcriptionWorker.current ?? new Worker(
-        new URL("../workers/transcription.worker.ts", import.meta.url),
-        { type: "module" },
-      );
-      transcriptionWorker.current = worker;
-      worker.onmessage = (event: MessageEvent<{ type: string; text?: string; message?: string }>) => {
-        if (event.data.type === "status" && event.data.message) setTranscriptionStatus(event.data.message);
-        if (event.data.type === "complete") resolve(event.data.text ?? "");
-        if (event.data.type === "error") reject(new Error(event.data.message ?? "Local transcription failed"));
-      };
-      worker.onerror = (event) => reject(new Error(event.message || "Local transcription worker failed"));
-      const device = "gpu" in navigator ? "webgpu" : "wasm";
-      worker.postMessage({ audio, device }, [audio.buffer]);
-    });
+  function startBrowserRecognition() {
+    const speechWindow = window as typeof window & {
+      SpeechRecognition?: SpeechRecognitionConstructor;
+      webkitSpeechRecognition?: SpeechRecognitionConstructor;
+    };
+    const Recognition = speechWindow.SpeechRecognition ?? speechWindow.webkitSpeechRecognition;
+    if (!Recognition) return;
+
+    const recognition = new Recognition();
+    browserRecognition.current = recognition;
+    browserFinalTranscript.current = "";
+    recognition.lang = "hi-IN";
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.maxAlternatives = 1;
+    recognition.onresult = (event) => {
+      let interim = "";
+      for (let item = event.resultIndex; item < event.results.length; item += 1) {
+        const result = event.results[item];
+        const text = result[0]?.transcript?.trim() ?? "";
+        if (result.isFinal && text) browserFinalTranscript.current = `${browserFinalTranscript.current} ${text}`.trim();
+        else if (text) interim = `${interim} ${text}`.trim();
+      }
+      setTranscript(`${browserFinalTranscript.current} ${interim}`.trim());
+    };
+    recognition.onerror = (event) => micLog("browser speech recognition error", { error: event.error });
+    recognition.onend = () => { browserRecognition.current = null; };
+    try { recognition.start(); }
+    catch (caught) { micLog("browser speech recognition unavailable", { error: String(caught) }); }
+  }
+
+  async function transcribeWithSpeechmatics(blob: Blob) {
+    const body = new FormData();
+    const extension = blob.type.includes("mp4") ? "mp4" : blob.type.includes("ogg") ? "ogg" : "webm";
+    body.append("audio", blob, `reading.${extension}`);
+    const response = await fetch("/api/transcribe", { method: "POST", body });
+    const payload = await response.json() as { text?: string; error?: string };
+    if (!response.ok || !payload.text) throw new Error(payload.error || "Transcription failed.");
+    return payload.text.trim();
   }
 
   async function startRecording() {
@@ -226,6 +252,7 @@ export default function OpenReader({ passages }: Props) {
     startedAt.current = Date.now();
     attempts.current += 1;
     setTranscript("");
+    browserFinalTranscript.current = "";
     setSeconds(0);
     const mimeType = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"]
       .find((candidate) => MediaRecorder.isTypeSupported(candidate));
@@ -249,20 +276,32 @@ export default function OpenReader({ passages }: Props) {
         setSeconds(duration);
         try {
           const blob = new Blob(audioChunks.current, { type: recorder.mimeType || "audio/webm" });
-          micLog("recording ready for local transcription", { bytes: blob.size, mimeType: blob.type, duration });
-          const text = await transcribeLocally(await decodeAudio(blob));
+          micLog("recording ready for Speechmatics transcription", { bytes: blob.size, mimeType: blob.type, duration });
+          setTranscriptionStatus(language === "hi" ? "रिकॉर्डिंग का सुरक्षित ट्रांसक्रिप्शन हो रहा है…" : "Securely transcribing your recording…");
+          const text = await transcribeWithSpeechmatics(blob);
           if (!text) throw new Error("No speech was recognized");
           setTranscript(text);
+          setTranscriptSource("server");
           setScore(scoreReading(passage.reference_text, text, duration, attempts.current));
           setError("");
           setStatus("details");
         } catch (caught) {
-          console.error("[Rajkamal Reader][mic] local transcription failed", caught);
-          setError(t.processingError);
-          setStatus("ready");
+          console.error("[Rajkamal Reader][mic] Speechmatics transcription failed", caught);
+          const fallback = browserFinalTranscript.current.trim();
+          if (fallback) {
+            setTranscript(fallback);
+            setTranscriptSource("browser");
+            setScore(scoreReading(passage.reference_text, fallback, duration, attempts.current));
+            setError(language === "hi" ? "सर्वर उपलब्ध नहीं था—यह browser का अनुमानित अभ्यास स्कोर है।" : "The server was unavailable—this is an unverified browser practice score.");
+            setStatus("details");
+          } else {
+            setError(t.processingError);
+            setStatus("ready");
+          }
         }
       };
       recorder.start(1000);
+      startBrowserRecognition();
       micLog("MediaRecorder started", { mimeType: recorder.mimeType });
       microphoneStarting.current = false;
       setStatus("recording");
@@ -281,6 +320,7 @@ export default function OpenReader({ passages }: Props) {
     stoppedAt.current = Date.now();
     micLog("finish requested by reader");
     setStatus("transcribing");
+    browserRecognition.current?.stop();
     recorder.stop();
   }
 
@@ -340,7 +380,7 @@ export default function OpenReader({ passages }: Props) {
     if (Object.keys(next).length) return;
     setIsSaving(true); setError("");
     try {
-      await saveReaderAttempt({ details, passage, transcript, durationSeconds: seconds, score, scoringSource: "browser" });
+      await saveReaderAttempt({ details: { ...details, leaderboardOptIn: transcriptSource === "server" && details.leaderboardOptIn }, passage, transcript, durationSeconds: seconds, score, scoringSource: transcriptSource });
       setStatus("result");
     } catch {
       setError(language === "hi" ? "आपके विवरण save नहीं हो पाए। Supabase setup और internet connection जाँचें।" : "We could not save your result. Check the Supabase setup and internet connection.");
@@ -394,27 +434,35 @@ export default function OpenReader({ passages }: Props) {
   const statusTitle = recording ? t.recording : status === "transcribing" ? t.transcribing : t.ready;
   const statusHelp = recording ? t.recordingHelp : status === "transcribing" ? (transcriptionStatus || t.transcribingHelp) : t.help;
 
-  return <main className="paper-grain min-h-screen pb-24">
+  return <main className="padhaku-shell min-h-screen pb-24">
     <header className="reader-topbar"><div className="mx-auto flex max-w-6xl items-center justify-between gap-3">
       <div className="flex min-w-0 items-center gap-2.5 sm:gap-3 lg:gap-4"><Image src="/rajkamal-emblem.svg" alt="Rajkamal" width={60} height={60} priority className="size-10 shrink-0 object-contain sm:size-12 lg:size-15" /><p className="reader-chant whitespace-nowrap text-sm font-bold text-[#7e1421] sm:text-lg lg:text-2xl" aria-label="साथ जुड़ें, साथ पढ़ें"><span>साथ </span><span className="flip-word"><span className="flip-word-sizer" aria-hidden="true">जुड़ें</span><span className="flip-word-sizer" aria-hidden="true">पढ़ें</span><span className="flip-word-item" aria-hidden="true">जुड़ें</span><span className="flip-word-item flip-word-delayed" aria-hidden="true">पढ़ें</span></span></p></div>
       <nav className="desktop-reader-nav" aria-label={language === "hi" ? "मुख्य नेविगेशन" : "Main navigation"}>{(["practice", "leaderboard", "progress"] as View[]).map((view) => <button key={view} className={activeView === view ? "active" : ""} onClick={() => setActiveView(view)}>{view === "practice" ? (language === "hi" ? "आज का पाठ" : "Today’s reading") : view === "leaderboard" ? (language === "hi" ? "लीडरबोर्ड" : "Leaderboard") : (language === "hi" ? "मेरी प्रगति" : "My progress")}</button>)}</nav>
       <button onClick={() => setLanguage(language === "hi" ? "en" : "hi")} className="flex shrink-0 items-center gap-1.5 rounded-xl border border-stone-300 bg-white px-3 py-2 text-xs font-bold text-[#7e1421] sm:gap-2 sm:px-4 sm:text-sm lg:px-5 lg:text-base"><Languages className="size-3.5 sm:size-4 lg:size-4.5" />{language === "hi" ? "English" : "हिंदी"}</button>
     </div></header>
-    {activeView === "practice" ? <section className="mx-auto max-w-6xl px-4 pt-7 sm:px-8 sm:pt-10">
-      <div className="mb-5 flex flex-wrap items-center justify-between gap-3"><div><p className="text-xs font-bold tracking-[.18em] text-[#b42332]">{language === "hi" ? "आज का अभ्यास" : "TODAY'S PRACTICE"}</p><h1 className="serif mt-1 text-xl font-bold sm:text-3xl">{t.motto}</h1></div><button onClick={nextPassage} disabled={busy} className="flex items-center gap-2 rounded-full border border-stone-300 bg-white px-4 py-2 text-sm font-semibold hover:border-[#b42332] hover:text-[#b42332] disabled:opacity-40"><RotateCcw className="size-4" />{t.newPassage}</button></div>
-      <article className="overflow-hidden rounded-xl border border-stone-200 bg-[#fffdf9] ">
-        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-stone-100 bg-[#fff7ec] px-5 py-4 sm:px-8"><div><div className="mb-2 flex gap-2"><span className="rounded-full bg-[#b42332] px-2.5 py-1 text-[10px] font-bold text-white">{language === "hi" ? "पाठ" : "PASSAGE"} {passage.sequence}/100</span><span className="rounded-full bg-white px-2.5 py-1 text-[10px] font-semibold text-stone-600">{passage.difficulty_editorial}</span></div><h2 className="serif text-xl font-bold sm:text-2xl">{passage.title}</h2></div><button onClick={listen} disabled={busy} className="flex items-center gap-2 rounded-full px-2 py-2 text-xs font-bold text-[#7e1421] disabled:opacity-40"><Volume2 className={`size-4 ${samplePlaying ? "animate-pulse text-[#b42332]" : ""}`} />{samplePlaying ? t.stopListen : t.listen}</button></div>
-        <div className="px-4 py-5 sm:px-8 sm:py-7"><div className="serif border-l-2 border-[#e5b043] pl-3 text-[1.1rem] leading-[1.9] text-stone-800 sm:text-[1.48rem] sm:leading-[2.2]">{passage.lines.map((line) => <p key={line}>{line}</p>)}</div><p className="mt-7 flex flex-wrap items-center gap-2 border-t border-stone-100 pt-5 text-xs text-stone-500"><BookOpen className="size-4 text-[#b42332]" />Hindi reading passage · {passage.word_count_whitespace} {language === "hi" ? "शब्द" : "words"}</p></div>
-      </article>
-      <section className={`mt-5 rounded-xl border p-5 sm:p-6 ${busy ? "border-[#b42332]/40 bg-[#7e1421] text-white" : "border-stone-200 bg-white"}`}>
-        <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between"><div className="flex items-center gap-4"><div className={`grid size-14 place-items-center rounded-full ${busy ? "bg-white/15" : "bg-[#fdf0ef] text-[#b42332]"}`}>{recording ? <Mic className="size-6" /> : <MicOff className="size-6" />}</div><div><p className={`text-sm font-bold ${busy ? "text-[#ffe8a7]" : "text-[#b42332]"}`}>{statusTitle}</p><p className={`mt-1 text-xs ${busy ? "text-white/70" : "text-stone-500"}`}>{statusHelp}</p></div></div><div className="flex items-center justify-between gap-4 sm:justify-end"><span className="flex items-center gap-2 font-mono text-xl font-bold"><Timer className="size-4" />{elapsed}</span>{recording ? <button onClick={finishRecording} className="rounded-full bg-[#e5b043] px-5 py-3 text-sm font-bold text-[#352311]">{t.finish}</button> : <button onClick={startRecording} disabled={status === "transcribing"} className="flex items-center gap-2 rounded-full bg-[#b42332] px-5 py-3 text-sm font-bold text-white hover:bg-[#7e1421] disabled:cursor-wait disabled:opacity-60"><Play className="size-4 fill-current" />{t.start}</button>}</div></div>
-        {recording && transcript && <p className="mt-4 text-sm" translate="no">{transcript}</p>}
-        {recording && <div className="mt-5 flex h-9 items-center justify-center gap-1.5">{Array.from({ length: 22 }).map((_, item) => <span key={item} className="audio-bar w-1 rounded-full bg-[#e5b043]" style={{ height: `${20 + ((item * 23) % 65)}%` }} />)}</div>}
-        {error && <p className={`mt-4 flex items-center gap-2 text-xs font-medium ${busy ? "text-[#ffe8a7]" : "text-[#b42332]"}`}><Info className="size-4" />{error}</p>}
-      </section>
-      <ScoreGuide hindi={language === "hi"} />
+    {activeView === "practice" ? <section className="padhaku-practice">
+      <div className="padhaku-intro"><div><p className="padhaku-eyebrow">{language === "hi" ? "हिंदी रीडिंग स्कोर" : "HINDI READING SCORE"}</p><h1>{language === "hi" ? "पढ़िए, रिकॉर्ड कीजिए, स्कोर बढ़ाइए।" : "Read, record, improve your score."}</h1><p>{language === "hi" ? "आज का छोटा हिंदी पाठ अपनी आवाज़ में पढ़ें।" : "Read today’s short Hindi passage in your own voice."}</p></div><button onClick={nextPassage} disabled={busy} className="padhaku-new"><RotateCcw className="size-4" />{t.newPassage}</button></div>
+      <div className="padhaku-grid">
+        <article className="padhaku-card">
+          <div className="padhaku-card-head"><div><span>{language === "hi" ? "पाठ" : "PASSAGE"} {passage.sequence} / {passages.length}</span><span className="padhaku-level">● {passage.difficulty_editorial}</span></div><i><b style={{ width: `${(passage.sequence / passages.length) * 100}%` }} /></i></div>
+          <div className="padhaku-title-row"><div><p>{t.newPassage}</p><h2>{passage.title}</h2></div><button onClick={listen} disabled={busy} className={samplePlaying ? "speaking" : ""}><span><Volume2 className="size-4" /></span>{samplePlaying ? t.stopListen : t.listen}</button></div>
+          <div className="padhaku-passage">{passage.lines.map((line) => <p key={line}>{line}</p>)}</div>
+          <div className="padhaku-meta"><span>{passage.word_count_whitespace} {language === "hi" ? "शब्द" : "words"}</span><span>{language === "hi" ? "लगभग 1 मिनट" : "about 1 minute"}</span><span>हिंदी</span></div>
+          <section className={`padhaku-record ${busy ? "active" : ""}`} aria-live="polite">
+            <div className="padhaku-record-copy"><strong>{statusTitle}</strong><span>{statusHelp}</span></div>
+            <div className="padhaku-record-actions"><span><Timer className="size-4" />{elapsed}</span>{recording ? <button onClick={finishRecording} className="recording"><Mic className="size-4" />{t.finish}</button> : <button onClick={startRecording} disabled={status === "transcribing"}><Play className="size-4 fill-current" />{t.start}</button>}</div>
+            {recording && <div className="padhaku-wave">{Array.from({ length: 18 }).map((_, item) => <i key={item} className="audio-bar" style={{ height: `${20 + ((item * 23) % 65)}%` }} />)}</div>}
+            {error && <p className="padhaku-error"><Info className="size-4" />{error}</p>}
+          </section>
+        </article>
+        <aside className="padhaku-side">
+          <section className="padhaku-leader"><div className="padhaku-side-title"><div><p>{language === "hi" ? "इस हफ्ते" : "THIS WEEK"}</p><h2>{language === "hi" ? "लीडरबोर्ड" : "Leaderboard"}</h2></div><Info className="size-5" /></div><div className="padhaku-ranks"><p><span>1</span><strong>{language === "hi" ? "रीडर 01" : "Reader 01"}</strong><b>94</b></p><p><span>2</span><strong>{language === "hi" ? "रीडर 02" : "Reader 02"}</strong><b>87</b></p><p><span>3</span><strong>{language === "hi" ? "रीडर 03" : "Reader 03"}</strong><b>81</b></p></div><button onClick={() => setActiveView("leaderboard")}>{language === "hi" ? "पूरी सूची देखें →" : "View full leaderboard →"}</button></section>
+          <section className="padhaku-streak"><p>{language === "hi" ? "राजकमल रीडिंग रिवार्ड्स" : "RAJKAMAL READING REWARDS"}</p><div><h2>{language === "hi" ? "अपनी रीडिंग स्ट्रीक बनाएँ" : "Build your reading streak"}</h2><span>🔥</span></div><i><b /></i><p>{language === "hi" ? "हर दिन एक नया पाठ पढ़ें और अपनी प्रगति देखें।" : "Read a new passage every day and follow your progress."}</p><button onClick={() => setActiveView("progress")}>{language === "hi" ? "अपनी प्रगति देखें →" : "View your progress →"}</button></section>
+          <ScoreGuide hindi={language === "hi"} />
+        </aside>
+      </div>
       {status === "unsupported" && <div className="mt-5 rounded-2xl border border-amber-300 bg-amber-50 p-5 text-sm text-amber-950">{t.unsupported}</div>}
-      {status === "details" && <div className="reader-modal fixed inset-0 z-50 flex items-end bg-stone-950/45 p-0 sm:items-center sm:justify-center sm:p-6" role="presentation"><section role="dialog" aria-modal="true" aria-labelledby="score-unlock-title" className="reader-modal-card mt-5 max-h-[92dvh] w-full overflow-y-auto rounded-xl border border-[#e5b043]/70 bg-[#fffaf0] p-5 sm:p-7"><p className="text-xs font-bold tracking-[.16em] text-[#b42332]">{t.profileTag}</p><h2 id="score-unlock-title" className="serif mt-1 text-2xl font-bold">{t.profileTitle}</h2><p className="mt-2 text-sm text-stone-600">{t.profileHelp}</p><p className="mt-4 rounded-xl bg-white/80 px-4 py-3 text-sm leading-6 text-stone-700">{transcript}</p>{error && <p className="mt-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-[#b42332]"><Info className="mr-1 inline size-4" />{error}</p>}<form onSubmit={submit} className="mt-6 grid gap-4 sm:grid-cols-2"><FormField label={t.name} error={errors.name}><input autoFocus value={details.name} onChange={(event) => setDetails({ ...details, name: event.target.value })} autoComplete="name" className={field} /></FormField><FormField label={t.age} error={errors.age}><input value={details.age} onChange={(event) => setDetails({ ...details, age: event.target.value })} type="number" min="5" max="120" className={field} /></FormField><FormField label={t.phone} error={errors.phone}><input value={details.phone} onChange={(event) => setDetails({ ...details, phone: event.target.value })} autoComplete="tel" inputMode="tel" placeholder="+91 98765 43210" className={field} /></FormField><FormField label={t.email} error={errors.email}><input value={details.email} onChange={(event) => setDetails({ ...details, email: event.target.value })} autoComplete="email" type="email" className={field} /></FormField><div className="sm:col-span-2"><FormField label={t.place} error={errors.place}><input value={details.place} onChange={(event) => setDetails({ ...details, place: event.target.value })} autoComplete="address-level2" className={field} /></FormField></div><label className="flex items-start gap-3 rounded-xl border border-[#eadabb] bg-white px-4 py-3 text-xs leading-5 text-stone-600 sm:col-span-2"><input checked={details.consent} onChange={(event) => setDetails({ ...details, consent: event.target.checked })} type="checkbox" className="mt-0.5 size-4 accent-[#b42332]" /><span>{t.consent}{errors.consent && <strong className="mt-1 block text-[#b42332]">{errors.consent}</strong>}</span></label><label className="flex items-start gap-3 text-xs leading-5 text-stone-600 sm:col-span-2"><input type="checkbox" checked={details.leaderboardOptIn} onChange={event => setDetails({ ...details, leaderboardOptIn: event.target.checked })} className="mt-0.5 size-4 accent-[#b42332]" /><span>{language === "hi" ? "अपना सर्वश्रेष्ठ स्कोर सूची में दिखाएँ। केवल एक अनाम Reader पहचान दिखेगी। बाद में इस विकल्प को हटाकर परिणाम सहेजने पर सूची से हट सकते हैं।" : "Show my best score on the leaderboard under an anonymous Reader label. To leave, uncheck this and save another result."}</span></label><p className="text-xs leading-5 text-stone-500 sm:col-span-2"><Info className="mr-1 inline size-3.5" />{t.privacy}</p><button disabled={isSaving} className="flex items-center justify-center gap-2 rounded-full bg-[#b42332] px-5 py-3 text-sm font-bold text-white hover:bg-[#7e1421] disabled:cursor-wait disabled:opacity-60 sm:col-span-2">{isSaving ? t.saving : t.view}</button></form></section></div>}
+      {status === "details" && <div className="reader-modal fixed inset-0 z-50 flex items-end bg-stone-950/45 p-0 sm:items-center sm:justify-center sm:p-6" role="presentation"><section role="dialog" aria-modal="true" aria-labelledby="score-unlock-title" className="reader-modal-card mt-5 max-h-[92dvh] w-full overflow-y-auto rounded-xl border border-[#e5b043]/70 bg-[#fffaf0] p-5 sm:p-7"><p className="text-xs font-bold tracking-[.16em] text-[#b42332]">{t.profileTag}</p><h2 id="score-unlock-title" className="serif mt-1 text-2xl font-bold">{t.profileTitle}</h2><p className="mt-2 text-sm text-stone-600">{t.profileHelp}</p><p className="mt-4 rounded-xl bg-white/80 px-4 py-3 text-sm leading-6 text-stone-700">{transcript}</p>{error && <p className="mt-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-[#b42332]"><Info className="mr-1 inline size-4" />{error}</p>}<form onSubmit={submit} className="mt-6 grid gap-4 sm:grid-cols-2"><FormField label={t.name} error={errors.name}><input autoFocus value={details.name} onChange={(event) => setDetails({ ...details, name: event.target.value })} autoComplete="name" className={field} /></FormField><FormField label={t.age} error={errors.age}><input value={details.age} onChange={(event) => setDetails({ ...details, age: event.target.value })} type="number" min="5" max="120" className={field} /></FormField><FormField label={t.phone} error={errors.phone}><input value={details.phone} onChange={(event) => setDetails({ ...details, phone: event.target.value })} autoComplete="tel" inputMode="tel" placeholder="+91 98765 43210" className={field} /></FormField><FormField label={t.email} error={errors.email}><input value={details.email} onChange={(event) => setDetails({ ...details, email: event.target.value })} autoComplete="email" type="email" className={field} /></FormField><div className="sm:col-span-2"><FormField label={t.place} error={errors.place}><input value={details.place} onChange={(event) => setDetails({ ...details, place: event.target.value })} autoComplete="address-level2" className={field} /></FormField></div><label className="flex items-start gap-3 rounded-xl border border-[#eadabb] bg-white px-4 py-3 text-xs leading-5 text-stone-600 sm:col-span-2"><input checked={details.consent} onChange={(event) => setDetails({ ...details, consent: event.target.checked })} type="checkbox" className="mt-0.5 size-4 accent-[#b42332]" /><span>{t.consent}{errors.consent && <strong className="mt-1 block text-[#b42332]">{errors.consent}</strong>}</span></label><label className="flex items-start gap-3 text-xs leading-5 text-stone-600 sm:col-span-2"><input type="checkbox" disabled={transcriptSource !== "server"} checked={transcriptSource === "server" && details.leaderboardOptIn} onChange={event => setDetails({ ...details, leaderboardOptIn: event.target.checked })} className="mt-0.5 size-4 accent-[#b42332] disabled:opacity-40" /><span>{transcriptSource !== "server" ? (language === "hi" ? "Browser के अनुमानित स्कोर को leaderboard में शामिल नहीं किया जा सकता।" : "Unverified browser scores cannot be added to the leaderboard.") : (language === "hi" ? "अपना सर्वश्रेष्ठ स्कोर सूची में दिखाएँ। केवल एक अनाम Reader पहचान दिखेगी।" : "Show my best score on the leaderboard under an anonymous Reader label.")}</span></label><p className="text-xs leading-5 text-stone-500 sm:col-span-2"><Info className="mr-1 inline size-3.5" />{t.privacy}</p><button disabled={isSaving} className="flex items-center justify-center gap-2 rounded-full bg-[#b42332] px-5 py-3 text-sm font-bold text-white hover:bg-[#7e1421] disabled:cursor-wait disabled:opacity-60 sm:col-span-2">{isSaving ? t.saving : t.view}</button></form></section></div>}
       {status === "result" && <section className="mt-5 rounded-xl border border-[#e5b043]/70 bg-[#fffaf0] p-5  sm:p-7"><div className="flex flex-col justify-between gap-5 sm:flex-row sm:items-start"><div><p className="flex items-center gap-2 text-xs font-bold tracking-[.16em] text-[#b42332]">{t.result}</p><h2 className="serif mt-2 text-3xl font-bold">{t.great}</h2></div><div className="rounded-2xl bg-[#b42332] px-6 py-4 text-center text-white"><p className="text-xs font-bold uppercase tracking-widest text-white/70">{t.score}</p><p className="serif text-4xl font-bold">{score.total}<span className="text-lg text-white/70">/100</span></p></div></div><div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4"><Metric label={t.accuracy} value={`${score.accuracy}%`} /><Metric label={t.fluency} value={`${score.fluency}%`} /><Metric label={t.completion} value={`${score.completion}%`} /><Metric label={t.speed} value={`${score.wordsPerMinute} WPM`} /></div><div className="mt-6 flex flex-col gap-3 border-t border-[#eadabb] pt-5 sm:flex-row"><button onClick={resetAttempt} className="flex flex-1 items-center justify-center gap-2 rounded-full border border-[#b42332] px-4 py-3 text-sm font-bold text-[#b42332]"><RotateCcw className="size-4" />{t.retry}</button><button onClick={downloadScoreCard} className="flex flex-1 items-center justify-center rounded-full border border-[#b42332] px-4 py-3 text-sm font-bold text-[#b42332]">{language === "hi" ? "स्कोर कार्ड डाउनलोड" : "Download score card"}</button><button onClick={share} className="flex flex-1 items-center justify-center gap-2 rounded-full bg-[#b42332] px-4 py-3 text-sm font-bold text-white"><Share2 className="size-4" />{t.share}</button></div></section>}
     </section> : <ReaderDashboard view={activeView} hindi={language === "hi"} refresh={status} onPractice={() => setActiveView("practice")} />}
     <nav className="mobile-reader-nav" aria-label={language === "hi" ? "मोबाइल नेविगेशन" : "Mobile navigation"}>{(["practice", "leaderboard", "progress"] as View[]).map((view) => <button key={view} className={activeView === view ? "active" : ""} onClick={() => setActiveView(view)}>{view === "practice" ? (language === "hi" ? "पाठ" : "Read") : view === "leaderboard" ? (language === "hi" ? "सूची" : "Leaders") : (language === "hi" ? "प्रगति" : "Progress")}</button>)}</nav>
