@@ -105,6 +105,7 @@ export default function OpenReader({ passages }: Props) {
   const audioChunks = useRef<Blob[]>([]);
   const browserRecognition = useRef<BrowserSpeechRecognition | null>(null);
   const browserFinalTranscript = useRef("");
+  const browserLatestTranscript = useRef("");
   const stoppedAt = useRef(0);
   const listeningToken = useRef(0);
   const listening = useRef(false);
@@ -158,6 +159,7 @@ export default function OpenReader({ passages }: Props) {
   function resetAttempt() {
     setStatus("ready"); setSeconds(0); setTranscript(""); setScore(emptyScore); setError(""); setErrors({}); setTranscriptionStatus(""); setTranscriptSource("browser");
     browserFinalTranscript.current = "";
+    browserLatestTranscript.current = "";
   }
 
   function nextPassage() {
@@ -177,6 +179,7 @@ export default function OpenReader({ passages }: Props) {
     const recognition = new Recognition();
     browserRecognition.current = recognition;
     browserFinalTranscript.current = "";
+    browserLatestTranscript.current = "";
     recognition.lang = "hi-IN";
     recognition.continuous = true;
     recognition.interimResults = true;
@@ -189,7 +192,8 @@ export default function OpenReader({ passages }: Props) {
         if (result.isFinal && text) browserFinalTranscript.current = `${browserFinalTranscript.current} ${text}`.trim();
         else if (text) interim = `${interim} ${text}`.trim();
       }
-      setTranscript(`${browserFinalTranscript.current} ${interim}`.trim());
+      browserLatestTranscript.current = `${browserFinalTranscript.current} ${interim}`.trim();
+      setTranscript(browserLatestTranscript.current);
     };
     recognition.onerror = (event) => micLog("browser speech recognition error", { error: event.error });
     recognition.onend = () => { browserRecognition.current = null; };
@@ -253,6 +257,7 @@ export default function OpenReader({ passages }: Props) {
     attempts.current += 1;
     setTranscript("");
     browserFinalTranscript.current = "";
+    browserLatestTranscript.current = "";
     setSeconds(0);
     const mimeType = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"]
       .find((candidate) => MediaRecorder.isTypeSupported(candidate));
@@ -287,7 +292,7 @@ export default function OpenReader({ passages }: Props) {
           setStatus("details");
         } catch (caught) {
           console.error("[Rajkamal Reader][mic] Speechmatics transcription failed", caught);
-          const fallback = browserFinalTranscript.current.trim();
+          const fallback = browserLatestTranscript.current.trim();
           if (fallback) {
             setTranscript(fallback);
             setTranscriptSource("browser");

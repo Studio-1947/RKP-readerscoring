@@ -14,6 +14,9 @@ export const runtime = "nodejs";
 export const maxDuration = 60;
 
 type JobResponse = {
+  code?: number;
+  detail?: string;
+  error?: string;
   id?: string;
   job?: { id?: string; status?: string; errors?: Array<{ message?: string }> };
 };
@@ -21,7 +24,10 @@ type JobResponse = {
 const wait = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
 function providerError(payload: JobResponse, fallback: string) {
-  return payload.job?.errors?.map((error) => error.message).filter(Boolean).join("; ") || fallback;
+  return payload.job?.errors?.map((error) => error.message).filter(Boolean).join("; ")
+    || payload.detail
+    || payload.error
+    || fallback;
 }
 
 export async function POST(request: Request) {
@@ -105,7 +111,15 @@ export async function POST(request: Request) {
     return Response.json({ text, source: "speechmatics" });
   } catch (caught) {
     console.error("[Rajkamal Reader][speechmatics] transcription failed", caught);
-    return Response.json({ error: "Transcription service could not process this recording." }, { status: 502 });
+    const message = caught instanceof Error ? caught.message : String(caught);
+    const noSpeech = message === "No speech was recognized.";
+    return Response.json(
+      {
+        error: noSpeech ? "No speech was detected in the recording." : "Transcription service could not process this recording.",
+        code: noSpeech ? "NO_SPEECH" : "PROVIDER_ERROR",
+      },
+      { status: noSpeech ? 422 : 502 },
+    );
   } finally {
     if (jobId) {
       await fetch(`${SPEECHMATICS_BASE_URL}/jobs/${encodeURIComponent(jobId)}`, {
