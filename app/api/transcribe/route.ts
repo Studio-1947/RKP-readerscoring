@@ -1,7 +1,7 @@
 const SPEECHMATICS_BASE_URL = "https://asr.api.speechmatics.com/v2";
 const MAX_AUDIO_BYTES = 5 * 1024 * 1024;
-const POLL_INTERVAL_MS = 750;
-const JOB_TIMEOUT_MS = 48_000;
+const POLL_INTERVAL_MS = 400;
+const JOB_TIMEOUT_MS = 12_000;
 const ACCEPTED_AUDIO_TYPES = new Set([
   "audio/webm",
   "audio/mp4",
@@ -10,8 +10,16 @@ const ACCEPTED_AUDIO_TYPES = new Set([
   "audio/x-wav",
 ]);
 
+const EXTENSION_MAP: Record<string, string> = {
+  "audio/webm": "webm",
+  "audio/mp4": "mp4",
+  "audio/ogg": "ogg",
+  "audio/wav": "wav",
+  "audio/x-wav": "wav",
+};
+
 export const runtime = "nodejs";
-export const maxDuration = 60;
+export const maxDuration = 15;
 
 type JobResponse = {
   code?: number;
@@ -87,12 +95,18 @@ export async function POST(request: Request) {
     if (!audioBytes.byteLength) throw new Error("Recording body was empty after parsing.");
     const providerFile = new Blob([audioBytes], { type: normalizedType || "audio/webm" });
 
+    const ext = EXTENSION_MAP[normalizedType] || "webm";
+    const filename = (audio.name && audio.name !== "blob" && audio.name.includes("."))
+      ? audio.name
+      : `reading.${ext}`;
+
     const providerBody = new FormData();
-    providerBody.append("data_file", providerFile, audio.name || "reading.webm");
+    providerBody.append("data_file", providerFile, filename);
     providerBody.append("config", JSON.stringify({
       type: "transcription",
       transcription_config: {
         language: "hi",
+        operating_point: "standard",
       },
     }));
 
@@ -149,8 +163,6 @@ export async function POST(request: Request) {
       {
         error: noSpeech ? "No speech was detected in the recording." : timedOut ? "Transcription timed out. Please try a shorter recording." : "Transcription service could not process this recording.",
         code: noSpeech ? "NO_SPEECH" : timedOut ? "PROVIDER_TIMEOUT" : `PROVIDER_${stage.toUpperCase()}_${upstreamStatus || "NETWORK"}`,
-        // The upstream message is a format/validation string, never credentials — carrying
-        // it through keeps a failure diagnosable from the browser console alone.
         detail: noSpeech || timedOut ? undefined : message,
         requestId,
       },
@@ -166,3 +178,4 @@ export async function POST(request: Request) {
     }
   }
 }
+
