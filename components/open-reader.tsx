@@ -207,6 +207,7 @@ export default function OpenReader({ passages }: Props) {
     };
     recognition.onresult = (event) => {
       if (browserRecognition.current !== recognition) return;
+      recognitionRetries.current = 0;
       let interim = "";
       let final = prefix;
       for (let item = 0; item < event.results.length; item += 1) {
@@ -221,10 +222,11 @@ export default function OpenReader({ passages }: Props) {
     };
     recognition.onerror = (event) => {
       micLog("browser speech recognition error", { error: event.error });
-      retryable = event.error === "no-speech";
+      retryable = event.error === "no-speech" || event.error === "network";
       setBrowserHint(event.error === "no-speech" ? t.noSpeechHint : event.error === "network" ? t.networkError : t.serviceBlocked);
     };
     recognition.onend = () => {
+      micLog("browser recognition ended", { retryable, retries: recognitionRetries.current });
       finish?.();
       if (browserRecognition.current !== recognition) return;
       browserRecognition.current = null;
@@ -247,8 +249,8 @@ export default function OpenReader({ passages }: Props) {
     const body = new FormData();
     const extension = blob.type.includes("mp4") ? "mp4" : blob.type.includes("ogg") ? "ogg" : "webm";
     body.append("audio", blob, `reading.${extension}`);
-    const response = await fetch("/api/transcribe", { method: "POST", body });
-    const payload = await response.json() as { text?: string; error?: string; code?: string; requestId?: string };
+    const response = await fetch("/api/transcribe", { method: "POST", body, signal: AbortSignal.timeout(55_000) });
+    const payload = await response.json().catch(() => ({ error: "Transcription returned an invalid response." })) as { text?: string; error?: string; code?: string; requestId?: string };
     if (!response.ok || !payload.text) throw new Error(`${payload.error || "Transcription failed."} [${payload.code || response.status}${payload.requestId ? ` / ${payload.requestId}` : ""}]`);
     return payload.text.trim();
   }
@@ -300,6 +302,7 @@ export default function OpenReader({ passages }: Props) {
     setTranscript("");
     setBrowserHint("");
     recognitionRetries.current = 0;
+    recognitionFinish.current = Promise.resolve();
     if (recordingUrlRef.current) URL.revokeObjectURL(recordingUrlRef.current);
     recordingUrlRef.current = "";
     setRecordingUrl("");
@@ -381,7 +384,8 @@ export default function OpenReader({ passages }: Props) {
     micLog("finish requested by reader");
     setStatus("transcribing");
     if (recognitionRestart.current) clearTimeout(recognitionRestart.current);
-    browserRecognition.current?.stop();
+    try { browserRecognition.current?.stop(); }
+    catch (caught) { micLog("browser recognition stop failed", { error: String(caught) }); }
     recorder.stop();
   }
 
