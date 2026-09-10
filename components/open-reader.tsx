@@ -107,7 +107,7 @@ export default function OpenReader({ passages }: Props) {
   const recognitionFinish = useRef<Promise<void>>(Promise.resolve());
   const resolveRecognitionFinish = useRef<(() => void) | null>(null);
   const recognitionRetries = useRef(0);
-  const [details, setDetails] = useState<Details>({ name: "", age: "", phone: "", email: "", place: "", consent: false, leaderboardOptIn: false });
+  const [details, setDetails] = useState<Details>({ name: "", age: "", phone: "", email: "", place: "", consent: false, leaderboardOptIn: true });
   const [errors, setErrors] = useState<Partial<Record<keyof Details, string>>>({});
   const [topLeaders, setTopLeaders] = useState<Leader[]>([]);
   const mediaRecorder = useRef<MediaRecorder | null>(null);
