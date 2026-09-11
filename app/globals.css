@@ -139,7 +139,7 @@ main { overflow-wrap: anywhere; }
 @media (max-width: 900px) {
   .leaderboard-grid { grid-template-columns: 1fr; }
 }
-.quiz-fullscreen { display: flex; min-height: calc(100dvh - 5.5rem); width: min(720px, calc(100% - 32px)); margin: 0 auto; flex-direction: column; justify-content: space-between; padding: 28px 0 24px; }
+.quiz-fullscreen { display: flex; width: min(720px, calc(100% - 32px)); margin: 0 auto; flex-direction: column; padding: 20px 0 16px; }
 .quiz-progress { height: 6px; overflow: hidden; border-radius: 99px; background: #eadde0; }
 .quiz-progress > div { height: 100%; border-radius: inherit; background: var(--raj-red); transition: width .25s ease; }
 .quiz-counter { margin: 24px 0 0; color: #c91e2b; text-transform: uppercase; letter-spacing: .12em; font-size: .78rem; font-weight: 900; }

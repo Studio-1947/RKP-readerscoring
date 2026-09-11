@@ -202,6 +202,9 @@ export default function OpenReader({ passages }: Props) {
   const [topLeaders, setTopLeaders] = useState<Leader[]>([]);
   const [savedReader, setSavedReader] = useState<Details | null>(null);
   const [streakStats, setStreakStats] = useState<StreakStats>({ current: 0, weekly: 0, monthly: 0 });
+  const [completedPassageIds, setCompletedPassageIds] = useState<Set<string>>(new Set());
+  const [modalScoreVisible, setModalScoreVisible] = useState(false);
+  const passageIndexInitialized = useRef(false);
   const mediaRecorder = useRef<MediaRecorder | null>(null);
   const microphoneStream = useRef<MediaStream | null>(null);
   const microphoneStarting = useRef(false);
@@ -240,7 +243,7 @@ export default function OpenReader({ passages }: Props) {
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") resetAttempt();
+      if (event.key === "Escape") closeDetailsModal();
     };
     window.addEventListener("keydown", closeOnEscape);
     return () => {
@@ -278,8 +281,17 @@ export default function OpenReader({ passages }: Props) {
         ]);
         if (!cancelled) setTopLeaders((data ?? []).slice(0, 3));
         if (auth.user) {
-          const { data: history } = await supabase.from("reading_attempts").select("created_at").order("created_at", { ascending: false }).limit(370);
-          if (!cancelled && history) setStreakStats(calculateStreakStats(history.map(row => row.created_at)));
+          const { data: history } = await supabase.from("reading_attempts").select("created_at,passage_id").order("created_at", { ascending: false }).limit(370);
+          if (!cancelled && history) {
+            setStreakStats(calculateStreakStats(history.map(row => row.created_at)));
+            const doneIds = new Set(history.map(row => row.passage_id));
+            setCompletedPassageIds(doneIds);
+            if (!passageIndexInitialized.current) {
+              passageIndexInitialized.current = true;
+              const firstUnseen = passages.findIndex((item) => !doneIds.has(item.id));
+              if (firstUnseen !== -1) setIndex(firstUnseen);
+            }
+          }
         }
       } catch {
         if (!cancelled) setTopLeaders([]);
@@ -287,7 +299,7 @@ export default function OpenReader({ passages }: Props) {
     }
     void loadLeaders();
     return () => { cancelled = true; };
-  }, [status]);
+  }, [status, passages]);
 
   useEffect(() => () => {
     micLog("component cleanup");
@@ -330,13 +342,26 @@ export default function OpenReader({ passages }: Props) {
 
   function resetAttempt() {
     setStatus("ready"); setSeconds(0); setTranscript(""); setScore(emptyScore); setError(""); setErrors({}); setTranscriptionStatus(""); setTranscriptSource("browser");
+    setModalScoreVisible(false);
     browserFinalTranscript.current = "";
     browserLatestTranscript.current = "";
   }
 
+  function closeDetailsModal() {
+    // Closing (by mistake or on purpose) keeps the transcript/score around so the
+    // reader can resume and save it later instead of losing a completed reading.
+    setStatus("ready");
+  }
+
   function nextPassage() {
     if (busy) return;
-    setIndex((value) => (value + 1) % passages.length);
+    setIndex((value) => {
+      for (let step = 1; step <= passages.length; step += 1) {
+        const candidate = (value + step) % passages.length;
+        if (!completedPassageIds.has(passages[candidate].id)) return candidate;
+      }
+      return (value + 1) % passages.length;
+    });
     resetAttempt();
   }
 
@@ -644,7 +669,6 @@ export default function OpenReader({ passages }: Props) {
     if (details.phone.replace(/\D/g, "").length < 10) next.phone = t.phoneError;
     if (details.email && !/^\S+@\S+\.\S+$/.test(details.email)) next.email = t.emailError;
     if (!details.place.trim()) next.place = t.missing;
-    if (!details.consent) next.consent = t.missing;
     setErrors(next);
     if (Object.keys(next).length) return;
     setIsSaving(true); setError("");
@@ -653,7 +677,7 @@ export default function OpenReader({ passages }: Props) {
       const persisted = { ...details, leaderboardOptIn: transcriptSource === "server" && details.leaderboardOptIn };
       savedReaderRef.current = persisted;
       setSavedReader(persisted);
-      setStatus("result");
+      setModalScoreVisible(true);
     } catch {
       setError(language === "hi" ? "आपके विवरण save नहीं हो पाए। Supabase setup और internet connection जाँचें।" : "We could not save your result. Check the Supabase setup and internet connection.");
     } finally { setIsSaving(false); }
@@ -668,7 +692,8 @@ export default function OpenReader({ passages }: Props) {
   function downloadScoreCard() {
     downloadScoreCardImage({
       readerName: savedReader?.name || details.name || (language === "hi" ? "पाठक" : "Reader"),
-      subtitle: passage.title,
+      kicker: language === "hi" ? "हिंदी साहित्यिक पाठ" : "HINDI LITERARY PASSAGE",
+      title: passage.title,
       totalScore: score.total,
       metrics: [
         { label: language === "hi" ? "शुद्धता" : "ACCURACY", value: `${score.accuracy}%` },
@@ -694,7 +719,7 @@ export default function OpenReader({ passages }: Props) {
       <div className="padhaku-intro"><div><p className="padhaku-eyebrow">{language === "hi" ? "हिंदी रीडिंग स्कोर" : "HINDI READING SCORE"}</p><h1>{language === "hi" ? "पढ़िए, रिकॉर्ड कीजिए, स्कोर बढ़ाइए।" : "Read, record, improve your score."}</h1><p>{language === "hi" ? "आज का छोटा हिंदी पाठ अपनी आवाज़ में पढ़ें।" : "Read today’s short Hindi passage in your own voice."}</p></div><button onClick={nextPassage} disabled={busy} className="padhaku-new"><RotateCcw className="size-4" />{t.newPassage}</button></div>
       <div className="padhaku-grid">
         <article className="padhaku-card">
-          <div className="padhaku-title-row"><div><div className="padhaku-kicker"><p>#{passage.sequence}</p><span className="padhaku-level">● {passage.difficulty_editorial}</span></div><h2>{passage.title}</h2></div><button onClick={listen} disabled={busy} aria-pressed={samplePlaying} className={samplePlaying ? "speaking" : ""}><span><Volume2 className="size-4" /></span>{samplePlaying ? t.stopListen : t.listen}</button></div>
+          <div className="padhaku-title-row"><div><h2>{passage.title}</h2></div><button onClick={listen} disabled={busy} aria-pressed={samplePlaying} className={samplePlaying ? "speaking" : ""}><span><Volume2 className="size-4" /></span>{samplePlaying ? t.stopListen : t.listen}</button></div>
           <div className="padhaku-passage">{passage.lines.map((line) => <p key={line}>{line}</p>)}</div>
           <div className="padhaku-meta"><span>{passage.word_count_whitespace} {language === "hi" ? "शब्द" : "words"}</span><span>{language === "hi" ? "लगभग 1 मिनट" : "about 1 minute"}</span><span>हिंदी</span></div>
           <section className={`padhaku-record ${busy ? "active" : ""}`} aria-live="polite" aria-busy={status === "transcribing"}>
@@ -720,15 +745,24 @@ export default function OpenReader({ passages }: Props) {
       </div>
       {status === "unsupported" && <div className="mt-5 rounded-2xl border border-amber-300 bg-amber-50 p-5 text-sm text-amber-950">{t.unsupported}</div>}
       {status === "details" && <div className="reader-modal fixed inset-0 z-[70] flex items-end justify-center bg-stone-950/45 p-0 sm:items-center sm:p-6" role="presentation">
-        <section role="dialog" aria-modal="true" aria-labelledby="score-unlock-title" className="reader-modal-card mt-5 flex max-h-[92dvh] w-full flex-col overflow-hidden border border-[#e5b043]/70 bg-[#fffaf0]">
-          <div className="flex shrink-0 items-start justify-between gap-3 border-b border-[#eadabb] px-5 pb-4 pt-5 sm:px-7 sm:pt-6">
-            <div className="min-w-0"><p className="text-xs font-bold tracking-[.16em] text-[#b42332]">{t.profileTag}</p><h2 id="score-unlock-title" className="serif mt-1 text-xl font-bold sm:text-2xl">{t.profileTitle}</h2></div>
-            <button type="button" onClick={resetAttempt} aria-label={language === "hi" ? "बंद करें" : "Close"} className="-mr-2 -mt-2 grid size-10 shrink-0 place-items-center rounded-full text-stone-500 hover:bg-stone-900/5 hover:text-stone-800"><X className="size-5" /></button>
+        <section role="dialog" aria-modal="true" aria-label={modalScoreVisible ? t.result : t.profileTitle} className="reader-modal-card mt-5 flex max-h-[92dvh] w-full flex-col overflow-hidden border border-[#e5b043]/70 bg-[#fffaf0]">
+          <div className="flex shrink-0 items-center justify-end gap-3 px-5 pt-4 sm:px-7 sm:pt-5">
+            <button type="button" onClick={modalScoreVisible ? resetAttempt : closeDetailsModal} aria-label={language === "hi" ? "बंद करें" : "Close"} className="-mr-2 grid size-10 shrink-0 place-items-center rounded-full text-stone-500 hover:bg-stone-900/5 hover:text-stone-800"><X className="size-5" /></button>
           </div>
-          <form onSubmit={submit} className="flex min-h-0 flex-1 flex-col">
-            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-4 sm:px-7">
+          {modalScoreVisible ? <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 pb-6 pt-1 sm:px-7">
+            <div className="flex flex-col justify-between gap-5 sm:flex-row sm:items-start">
+              <div><p className="flex items-center gap-2 text-xs font-bold tracking-[.16em] text-[#b42332]">{t.result}</p><h2 className="serif mt-2 text-2xl font-bold sm:text-3xl">{t.great}</h2></div>
+              <div className="rounded-2xl bg-[#b42332] px-6 py-4 text-center text-white"><p className="text-xs font-bold uppercase tracking-widest text-white/70">{t.score}</p><p className="serif text-4xl font-bold">{score.total}<span className="text-lg text-white/70">/100</span></p></div>
+            </div>
+            <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4"><Metric label={t.accuracy} value={`${score.accuracy}%`} /><Metric label={t.fluency} value={`${score.fluency}%`} /><Metric label={t.completion} value={`${score.completion}%`} /><Metric label={t.speed} value={`${score.wordsPerMinute} WPM`} /></div>
+            <div className="mt-6 flex flex-col gap-3 border-t border-[#eadabb] pt-5 sm:flex-row">
+              <button onClick={resetAttempt} className="flex flex-1 items-center justify-center gap-2 rounded-full border border-[#b42332] px-4 py-3 text-sm font-bold text-[#b42332]"><RotateCcw className="size-4" />{t.retry}</button>
+              <button onClick={downloadScoreCard} className="flex flex-1 items-center justify-center rounded-full border border-[#b42332] px-4 py-3 text-sm font-bold text-[#b42332]">{language === "hi" ? "स्कोर कार्ड डाउनलोड" : "Download score card"}</button>
+              <button onClick={share} className="flex flex-1 items-center justify-center gap-2 rounded-full bg-[#b42332] px-4 py-3 text-sm font-bold text-white"><Share2 className="size-4" />{t.share}</button>
+            </div>
+          </div> : <form onSubmit={submit} className="flex min-h-0 flex-1 flex-col">
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 pb-4 pt-1 sm:px-7">
               <p className="text-sm text-stone-600">{t.profileHelp}</p>
-              <p className="mt-3 rounded-xl bg-white/80 px-4 py-3 text-sm leading-6 text-stone-700">{transcript}</p>
               {error && <p className="mt-3 rounded-xl bg-red-50 px-4 py-3 text-sm text-[#b42332]" role="alert"><Info className="mr-1 inline size-4" />{error}</p>}
               <div className="mt-5 grid gap-4 sm:grid-cols-2">
                 <FormField label={t.name} error={errors.name}><input autoFocus value={details.name} onChange={(event) => setDetails({ ...details, name: event.target.value })} autoComplete="name" className={field} /></FormField>
@@ -736,7 +770,6 @@ export default function OpenReader({ passages }: Props) {
                 <FormField label={t.phone} error={errors.phone}><input value={details.phone} onChange={(event) => setDetails({ ...details, phone: event.target.value })} autoComplete="tel" inputMode="tel" placeholder="+91 98765 43210" className={field} /></FormField>
                 <FormField label={t.email} error={errors.email}><input value={details.email} onChange={(event) => setDetails({ ...details, email: event.target.value })} autoComplete="email" type="email" className={field} /></FormField>
                 <div className="sm:col-span-2"><FormField label={t.place} error={errors.place}><input value={details.place} onChange={(event) => setDetails({ ...details, place: event.target.value })} autoComplete="address-level2" className={field} /></FormField></div>
-                <label className="flex items-start gap-3 rounded-xl border border-[#eadabb] bg-white px-4 py-3 text-xs leading-5 text-stone-600 sm:col-span-2"><input checked={details.consent} onChange={(event) => setDetails({ ...details, consent: event.target.checked })} type="checkbox" className="mt-0.5 size-4 accent-[#b42332]" /><span>{t.consent}{errors.consent && <strong className="mt-1 block text-[#b42332]">{errors.consent}</strong>}</span></label>
                 <label className="flex items-start gap-3 text-xs leading-5 text-stone-600 sm:col-span-2"><input type="checkbox" disabled={transcriptSource !== "server"} checked={transcriptSource === "server" && details.leaderboardOptIn} onChange={event => setDetails({ ...details, leaderboardOptIn: event.target.checked })} className="mt-0.5 size-4 accent-[#b42332] disabled:opacity-40" /><span>{transcriptSource !== "server" ? (language === "hi" ? "Browser के अनुमानित स्कोर को leaderboard में शामिल नहीं किया जा सकता।" : "Unverified browser scores cannot be added to the leaderboard.") : (language === "hi" ? "अपना सर्वश्रेष्ठ स्कोर सूची में दिखाएँ। आपका पहला नाम लीडरबोर्ड पर दिखेगा।" : "Show my best score on the leaderboard. My first name will be shown publicly.")}</span></label>
                 <p className="text-xs leading-5 text-stone-500 sm:col-span-2"><Info className="mr-1 inline size-3.5" />{t.privacy}</p>
               </div>
@@ -744,8 +777,12 @@ export default function OpenReader({ passages }: Props) {
             <div className="shrink-0 border-t border-[#eadabb] px-5 py-3.5 pb-[calc(0.875rem+env(safe-area-inset-bottom))] sm:px-7">
               <button disabled={isSaving} className="flex w-full items-center justify-center gap-2 rounded-full bg-[#b42332] px-5 py-3 text-sm font-bold text-white hover:bg-[#7e1421] disabled:cursor-wait disabled:opacity-60">{isSaving ? t.saving : t.view}</button>
             </div>
-          </form>
+          </form>}
         </section>
+      </div>}
+      {status === "ready" && transcript && score.total > 0 && <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#e5b043]/70 bg-[#fffaf0] px-5 py-4">
+        <p className="text-sm text-stone-700">{language === "hi" ? "आपका पिछला पाठ अभी सेव नहीं हुआ है।" : "Your last reading hasn't been saved yet."}</p>
+        <button onClick={() => setStatus("details")} className="rounded-full bg-[#b42332] px-4 py-2 text-sm font-bold text-white hover:bg-[#7e1421]">{language === "hi" ? "जारी रखें →" : "Resume →"}</button>
       </div>}
       {status === "result" && <section className="mt-5 rounded-xl border border-[#e5b043]/70 bg-[#fffaf0] p-5  sm:p-7"><div className="flex flex-col justify-between gap-5 sm:flex-row sm:items-start"><div><p className="flex items-center gap-2 text-xs font-bold tracking-[.16em] text-[#b42332]">{t.result}</p><h2 className="serif mt-2 text-3xl font-bold">{t.great}</h2></div><div className="rounded-2xl bg-[#b42332] px-6 py-4 text-center text-white"><p className="text-xs font-bold uppercase tracking-widest text-white/70">{t.score}</p><p className="serif text-4xl font-bold">{score.total}<span className="text-lg text-white/70">/100</span></p></div></div><div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4"><Metric label={t.accuracy} value={`${score.accuracy}%`} /><Metric label={t.fluency} value={`${score.fluency}%`} /><Metric label={t.completion} value={`${score.completion}%`} /><Metric label={t.speed} value={`${score.wordsPerMinute} WPM`} /></div><div className="mt-6 flex flex-col gap-3 border-t border-[#eadabb] pt-5 sm:flex-row"><button onClick={resetAttempt} className="flex flex-1 items-center justify-center gap-2 rounded-full border border-[#b42332] px-4 py-3 text-sm font-bold text-[#b42332]"><RotateCcw className="size-4" />{t.retry}</button><button onClick={downloadScoreCard} className="flex flex-1 items-center justify-center rounded-full border border-[#b42332] px-4 py-3 text-sm font-bold text-[#b42332]">{language === "hi" ? "स्कोर कार्ड डाउनलोड" : "Download score card"}</button><button onClick={share} className="flex flex-1 items-center justify-center gap-2 rounded-full bg-[#b42332] px-4 py-3 text-sm font-bold text-white"><Share2 className="size-4" />{t.share}</button></div></section>}
     </section> : activeView === "quiz" ? <QuizTab hindi={language === "hi"} /> : activeView === "profile" ? <ReaderProfile hindi={language === "hi"} refresh={status} /> : <ReaderDashboard view={activeView} hindi={language === "hi"} refresh={status} onPractice={() => setActiveView("practice")} />}
