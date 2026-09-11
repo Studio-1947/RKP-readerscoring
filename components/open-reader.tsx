@@ -34,6 +34,50 @@ type BrowserSpeechRecognition = {
   onerror: ((event: { error: string }) => void) | null;
   onend: (() => void) | null;
 };
+
+async function normalizeRecordingToWav(recording: Blob) {
+  const context = new AudioContext();
+  try {
+    const decoded = await context.decodeAudioData(await recording.arrayBuffer());
+    const targetRate = 16_000;
+    const frameCount = Math.max(1, Math.round(decoded.duration * targetRate));
+    const pcm = new Int16Array(frameCount);
+    const rateRatio = decoded.sampleRate / targetRate;
+
+    for (let frame = 0; frame < frameCount; frame += 1) {
+      const sourceFrame = Math.min(decoded.length - 1, Math.floor(frame * rateRatio));
+      let sample = 0;
+      for (let channel = 0; channel < decoded.numberOfChannels; channel += 1) {
+        sample += decoded.getChannelData(channel)[sourceFrame] || 0;
+      }
+      sample = Math.max(-1, Math.min(1, sample / decoded.numberOfChannels));
+      pcm[frame] = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
+    }
+
+    const wav = new ArrayBuffer(44 + pcm.byteLength);
+    const view = new DataView(wav);
+    const writeText = (offset: number, value: string) => {
+      for (let index = 0; index < value.length; index += 1) view.setUint8(offset + index, value.charCodeAt(index));
+    };
+    writeText(0, "RIFF");
+    view.setUint32(4, 36 + pcm.byteLength, true);
+    writeText(8, "WAVE");
+    writeText(12, "fmt ");
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, 1, true);
+    view.setUint32(24, targetRate, true);
+    view.setUint32(28, targetRate * 2, true);
+    view.setUint16(32, 2, true);
+    view.setUint16(34, 16, true);
+    writeText(36, "data");
+    view.setUint32(40, pcm.byteLength, true);
+    new Int16Array(wav, 44).set(pcm);
+    return new Blob([wav], { type: "audio/wav" });
+  } finally {
+    await context.close().catch(() => undefined);
+  }
+}
 type SpeechRecognitionConstructor = new () => BrowserSpeechRecognition;
 
 const copy = {
@@ -264,7 +308,7 @@ export default function OpenReader({ passages }: Props) {
 
   async function transcribeWithSpeechmatics(blob: Blob) {
     const body = new FormData();
-    const extension = blob.type.includes("mp4") ? "mp4" : blob.type.includes("ogg") ? "ogg" : "webm";
+    const extension = blob.type.includes("wav") ? "wav" : blob.type.includes("mp4") ? "mp4" : blob.type.includes("ogg") ? "ogg" : "webm";
     body.append("audio", blob, `reading.${extension}`);
     const response = await fetch("/api/transcribe", { method: "POST", body, signal: AbortSignal.timeout(55_000) });
     const payload = await response.json().catch(() => ({ error: "Transcription returned an invalid response." })) as { text?: string; error?: string; code?: string; detail?: string; requestId?: string };
@@ -353,7 +397,14 @@ export default function OpenReader({ passages }: Props) {
         const duration = Math.max(1, Math.floor((stoppedAt.current - startedAt.current) / 1000));
         setSeconds(duration);
         try {
-          const blob = new Blob(audioChunks.current, { type: recorder.mimeType || "audio/webm" });
+          const recordedBlob = new Blob(audioChunks.current, { type: recorder.mimeType || "audio/webm" });
+          let blob = recordedBlob;
+          try {
+            blob = await normalizeRecordingToWav(recordedBlob);
+            micLog("recording normalized for Speechmatics", { originalBytes: recordedBlob.size, wavBytes: blob.size });
+          } catch (caught) {
+            micLog("recording normalization unavailable; using original container", { error: String(caught) });
+          }
           recordingUrlRef.current = URL.createObjectURL(blob);
           setRecordingUrl(recordingUrlRef.current);
           micLog("recording ready for Speechmatics transcription", { bytes: blob.size, mimeType: blob.type, duration });
