@@ -76,7 +76,8 @@ export function ReaderProfile({ hindi, refresh }: { hindi: boolean; refresh: str
   function downloadReadingCard(row: ReadingRow) {
     downloadScoreCard({
       readerName: details?.name ?? (hindi ? "पाठक" : "Reader"),
-      subtitle: row.passage_title,
+      kicker: hindi ? "हिंदी साहित्यिक पाठ" : "HINDI LITERARY PASSAGE",
+      title: row.passage_title,
       totalScore: row.total_score,
       metrics: [
         { label: hindi ? "शुद्धता" : "ACCURACY", value: `${row.accuracy}%` },
@@ -91,7 +92,7 @@ export function ReaderProfile({ hindi, refresh }: { hindi: boolean; refresh: str
   function downloadQuizCard(row: QuizRow) {
     downloadScoreCard({
       readerName: details?.name ?? (hindi ? "पाठक" : "Reader"),
-      subtitle: row.quiz_title,
+      kicker: hindi ? "हिंदी साहित्य क्विज़" : "HINDI LITERATURE QUIZ",
       totalScore: row.total_score,
       metrics: [
         { label: hindi ? "सही उत्तर" : "CORRECT", value: `${row.correct_count}/${row.total_questions}` },

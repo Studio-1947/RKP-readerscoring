@@ -2,13 +2,14 @@ export type ScoreCardMetric = { label: string; value: string };
 
 export function downloadScoreCard(input: {
   readerName: string;
-  subtitle: string;
+  kicker: string;
+  title?: string;
   totalScore: number;
   metrics: ScoreCardMetric[];
   hindi: boolean;
   filename?: string;
 }) {
-  const { readerName, subtitle, totalScore, metrics, hindi, filename = "rajkamal-score-card.png" } = input;
+  const { readerName, kicker, title, totalScore, metrics, hindi, filename = "rajkamal-score-card.png" } = input;
   const size = 1080;
   const canvas = document.createElement("canvas");
   canvas.width = size;
@@ -40,12 +41,18 @@ export function downloadScoreCard(input: {
   context.fillText(name.length > 20 ? `${name.slice(0, 20)}…` : name, centerX, 275);
 
   context.fillStyle = "rgba(255,255,255,.85)";
-  context.font = "600 32px Arial";
-  context.fillText(subtitle.length > 28 ? `${subtitle.slice(0, 28)}…` : subtitle, centerX, 335);
+  context.font = "600 30px Arial";
+  context.fillText(kicker.length > 32 ? `${kicker.slice(0, 32)}…` : kicker, centerX, 325);
+
+  if (title) {
+    context.fillStyle = "rgba(255,255,255,.7)";
+    context.font = "600 26px Arial";
+    context.fillText(title.length > 34 ? `${title.slice(0, 34)}…` : title, centerX, 362);
+  }
 
   context.fillStyle = "rgba(255,255,255,.7)";
   context.font = "700 28px Arial";
-  context.fillText(hindi ? "कुल स्कोर" : "TOTAL SCORE", centerX, 430);
+  context.fillText(hindi ? "कुल स्कोर" : "TOTAL SCORE", centerX, 440);
 
   context.fillStyle = "#ffffff";
   context.font = "900 170px Arial";
@@ -70,7 +77,7 @@ export function downloadScoreCard(input: {
 
   context.fillStyle = "rgba(255,255,255,.7)";
   context.font = "700 26px Arial";
-  context.fillText(hindi ? "राजकमल प्रकाशन" : "RAJKAMAL PRAKASHAN", centerX, size - 60);
+  context.fillText("WWW.DOMAINNAME.COM", centerX, size - 60);
 
   canvas.toBlob((blob) => {
     if (!blob) return;
