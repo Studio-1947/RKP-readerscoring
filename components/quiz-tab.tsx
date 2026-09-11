@@ -138,7 +138,7 @@ export function QuizTab({ hindi }: { hindi: boolean }) {
   return <section className="padhaku-practice">
     <div className="padhaku-intro"><div><p className="padhaku-eyebrow">{hindi ? "हिंदी साहित्य क्विज़" : "HINDI LITERATURE QUIZ"}</p><h1>{hindi ? quizTitle.hi : quizTitle.en}</h1><p>{hindi ? "हिंदी किताबों और लेखकों से जुड़े सवालों के सही जवाब चुनें।" : "Pick the right answers about Hindi books and authors."}</p></div></div>
     <div className="mt-6 space-y-4">
-      {questions.map((question, index) => <article key={question.id} className="padhaku-card">
+      {questions.map((question, index) => <article key={question.id} className="padhaku-card p-5 sm:p-6">
         <p className="text-xs font-bold tracking-[.1em] text-[#b42332]">{hindi ? `प्रश्न ${index + 1} / ${questions.length}` : `QUESTION ${index + 1} / ${questions.length}`}</p>
         <h2 className="serif mt-1 text-lg font-bold sm:text-xl">{hindi ? question.question.hi : question.question.en}</h2>
         <div className="mt-4 grid gap-2 sm:grid-cols-2">
