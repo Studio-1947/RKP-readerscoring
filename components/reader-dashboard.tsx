@@ -172,11 +172,11 @@ export function ReaderDashboard({ view, hindi, refresh, onPractice }: {
   </section>;
 }
 
-function ViewHeading({ eyebrow, title, subtitle }: { eyebrow: string; title: string; subtitle: string }) {
+export function ViewHeading({ eyebrow, title, subtitle }: { eyebrow: string; title: string; subtitle: string }) {
   return <div className="view-heading"><div><p>{eyebrow}</p><h1>{title}</h1><span>{subtitle}</span></div></div>;
 }
 
-function Insight({ icon, label, value }: { icon: React.ReactNode; label: string; value: React.ReactNode }) {
+export function Insight({ icon, label, value }: { icon: React.ReactNode; label: string; value: React.ReactNode }) {
   return <article className="insight-card"><span>{icon}</span><div><small>{label}</small><strong>{value}</strong></div></article>;
 }
 
