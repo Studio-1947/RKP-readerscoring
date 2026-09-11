@@ -17,6 +17,7 @@ type Details = { name: string; age: string; phone: string; email: string; place:
 type Leader = { reader_label: string; best_score: number };
 type Props = { passages: Passage[] };
 type TranscriptSource = "browser" | "server";
+const MAX_RECORDING_SECONDS = 90;
 type SpeechRecognitionResultEventLike = {
   resultIndex: number;
   results: ArrayLike<{ isFinal: boolean; 0: { transcript: string } }>;
@@ -43,14 +44,15 @@ async function normalizeRecordingToWav(recording: Blob) {
     const frameCount = Math.max(1, Math.round(decoded.duration * targetRate));
     const pcm = new Int16Array(frameCount);
     const rateRatio = decoded.sampleRate / targetRate;
+    const channels = Array.from({ length: decoded.numberOfChannels }, (_, channel) => decoded.getChannelData(channel));
 
     for (let frame = 0; frame < frameCount; frame += 1) {
       const sourceFrame = Math.min(decoded.length - 1, Math.floor(frame * rateRatio));
       let sample = 0;
-      for (let channel = 0; channel < decoded.numberOfChannels; channel += 1) {
-        sample += decoded.getChannelData(channel)[sourceFrame] || 0;
+      for (const channel of channels) {
+        sample += channel[sourceFrame] || 0;
       }
-      sample = Math.max(-1, Math.min(1, sample / decoded.numberOfChannels));
+      sample = Math.max(-1, Math.min(1, sample / channels.length));
       pcm[frame] = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
     }
 
@@ -148,6 +150,7 @@ export default function OpenReader({ passages }: Props) {
   const [recordingUrl, setRecordingUrl] = useState("");
   const recordingUrlRef = useRef("");
   const recognitionRestart = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const recordingTimeout = useRef<number | null>(null);
   const recognitionFinish = useRef<Promise<void>>(Promise.resolve());
   const resolveRecognitionFinish = useRef<(() => void) | null>(null);
   const recognitionRetries = useRef(0);
@@ -197,6 +200,7 @@ export default function OpenReader({ passages }: Props) {
     micLog("component cleanup");
     stoppedAt.current = Date.now();
     if (recognitionRestart.current) clearTimeout(recognitionRestart.current);
+    if (recordingTimeout.current) clearTimeout(recordingTimeout.current);
     if (recordingUrlRef.current) URL.revokeObjectURL(recordingUrlRef.current);
     resolveRecognitionFinish.current?.();
     const recorder = mediaRecorder.current;
@@ -432,6 +436,7 @@ export default function OpenReader({ passages }: Props) {
         }
       };
       recorder.start(1000);
+      recordingTimeout.current = window.setTimeout(finishRecording, MAX_RECORDING_SECONDS * 1000);
       startBrowserRecognition();
       micLog("MediaRecorder started", { mimeType: recorder.mimeType });
       microphoneStarting.current = false;
@@ -449,6 +454,10 @@ export default function OpenReader({ passages }: Props) {
     const recorder = mediaRecorder.current;
     if (!recorder || recorder.state === "inactive" || stoppedAt.current) return;
     stoppedAt.current = Date.now();
+    if (recordingTimeout.current) {
+      clearTimeout(recordingTimeout.current);
+      recordingTimeout.current = null;
+    }
     micLog("finish requested by reader");
     setStatus("transcribing");
     if (recognitionRestart.current) clearTimeout(recognitionRestart.current);
