@@ -48,24 +48,29 @@ export function ReaderDashboard({ view, hindi, refresh, onPractice }: {
   const [attempts, setAttempts] = useState<Attempt[]>([]);
   const [leaders, setLeaders] = useState<Leader[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     async function load() {
       setLoading(true);
+      setLoadError(false);
       try {
         const supabase = createClient();
-        const [{ data: leaderboard }, { data: auth }] = await Promise.all([
+        const [{ data: leaderboard, error: leaderboardError }, { data: auth, error: authError }] = await Promise.all([
           supabase.rpc("practice_leaderboard"),
           supabase.auth.getUser(),
         ]);
+        if (leaderboardError) throw leaderboardError;
+        if (authError && authError.name !== "AuthSessionMissingError") throw authError;
         let history: Attempt[] = [];
         if (auth.user) {
-          const { data } = await supabase
+          const { data, error: historyError } = await supabase
             .from("reading_attempts")
             .select("created_at,passage_title,total_score,accuracy,fluency,completion,words_per_minute")
             .order("created_at", { ascending: true })
             .limit(100);
+          if (historyError) throw historyError;
           history = data ?? [];
         }
         if (!cancelled) {
@@ -74,6 +79,7 @@ export function ReaderDashboard({ view, hindi, refresh, onPractice }: {
         }
       } catch {
         if (!cancelled) {
+          setLoadError(true);
           setLeaders([]);
           setAttempts([]);
         }
@@ -93,6 +99,7 @@ export function ReaderDashboard({ view, hindi, refresh, onPractice }: {
   }, [attempts]);
 
   if (loading) return <section className="dashboard-empty">{hindi ? "डेटा लोड हो रहा है…" : "Loading your reading data…"}</section>;
+  if (loadError) return <section className="dashboard-empty">{hindi ? "रीडिंग डेटा अभी उपलब्ध नहीं है। कृपया दोबारा कोशिश करें।" : "Reading data is temporarily unavailable. Please try again."}</section>;
 
   if (view === "leaderboard") {
     const average = leaders.length ? Math.round(leaders.reduce((sum, row) => sum + row.best_score, 0) / leaders.length) : 0;
@@ -105,7 +112,7 @@ export function ReaderDashboard({ view, hindi, refresh, onPractice }: {
       </div>
       <div className="dashboard-card">
         <div className="card-heading"><h2>{hindi ? "सभी पाठक" : "All readers"}</h2><button onClick={() => downloadCsv("rajkamal-leaderboard.csv", [["Rank", "Reader", "Best score"], ...leaders.map((row, index) => [index + 1, row.reader_label, row.best_score])])}><Download />{hindi ? "डाउनलोड" : "Download"}</button></div>
-        {!leaders.length ? <Empty hindi={hindi} onPractice={onPractice} /> : <ol className="leader-list">{leaders.map((row, index) => <li key={`${index}-${row.reader_label}`}><span className="rank">#{index + 1}</span><span className="avatar">{row.reader_label.charAt(0).toUpperCase()}</span><strong>{row.reader_label}</strong><b>{row.best_score}<small>/100</small></b></li>)}</ol>}
+        {!leaders.length ? <Empty hindi={hindi} onPractice={onPractice} /> : <ol className="leader-list">{leaders.map((row, index) => <li key={`${index}-${row.reader_label}`}><span className="rank">#{leaders.findIndex(leader => leader.best_score === row.best_score) + 1}</span><span className="avatar">{row.reader_label.charAt(0).toUpperCase()}</span><strong>{row.reader_label}</strong><b>{row.best_score}<small>/100</small></b></li>)}</ol>}
       </div>
     </section>;
   }
