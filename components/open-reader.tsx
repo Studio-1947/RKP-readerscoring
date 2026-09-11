@@ -6,6 +6,7 @@ import { ScoreGuide } from "@/components/reading-context";
 import { ReaderDashboard } from "@/components/reader-dashboard";
 import { QuizTab } from "@/components/quiz-tab";
 import { ReaderProfile } from "@/components/reader-profile";
+import { downloadScoreCard as downloadScoreCardImage } from "@/lib/score-card";
 import { Info, Languages, Mic, Play, RotateCcw, Share2, Timer, Volume2, X } from "lucide-react";
 import { ReadingScore, scoreReading } from "@/lib/scoring";
 import { loadSavedReaderDetails, saveReaderAttempt } from "@/lib/reader-storage";
@@ -666,82 +667,18 @@ export default function OpenReader({ passages }: Props) {
   }
 
   function downloadScoreCard() {
-    const size = 1080;
-    const canvas = document.createElement("canvas");
-    canvas.width = size;
-    canvas.height = size;
-    const context = canvas.getContext("2d");
-    if (!context) return;
-    const centerX = size / 2;
-
-    const background = context.createLinearGradient(0, 0, size, size);
-    background.addColorStop(0, "#7e1421");
-    background.addColorStop(1, "#b42332");
-    context.fillStyle = background;
-    context.fillRect(0, 0, size, size);
-    context.fillStyle = "rgba(255,255,255,.06)";
-    context.beginPath(); context.arc(size * 0.86, size * 0.12, size * 0.32, 0, Math.PI * 2); context.fill();
-    context.beginPath(); context.arc(size * 0.08, size * 0.94, size * 0.22, 0, Math.PI * 2); context.fill();
-
-    context.textAlign = "center";
-    context.fillStyle = "#e5b043";
-    context.fillRect(centerX - 45, 92, 90, 8);
-
-    context.fillStyle = "#ffe8a7";
-    context.font = "800 42px Arial";
-    context.fillText(language === "hi" ? "पढ़ाकू क्लब" : "PADHAKU CLUB", centerX, 170);
-
-    const readerName = (savedReader?.name || details.name || (language === "hi" ? "पाठक" : "Reader")).trim();
-    context.fillStyle = "#ffffff";
-    context.font = "900 68px Arial";
-    context.fillText(readerName.length > 20 ? `${readerName.slice(0, 20)}…` : readerName, centerX, 275);
-
-    context.fillStyle = "rgba(255,255,255,.85)";
-    context.font = "600 32px Arial";
-    context.fillText(passage.title.length > 28 ? `${passage.title.slice(0, 28)}…` : passage.title, centerX, 335);
-
-    context.fillStyle = "rgba(255,255,255,.7)";
-    context.font = "700 28px Arial";
-    context.fillText(language === "hi" ? "कुल स्कोर" : "TOTAL SCORE", centerX, 430);
-
-    context.fillStyle = "#ffffff";
-    context.font = "900 170px Arial";
-    context.fillText(`${score.total}/100`, centerX, 630);
-
-    const metrics = [
-      { label: language === "hi" ? "शुद्धता" : "ACCURACY", value: `${score.accuracy}%` },
-      { label: language === "hi" ? "प्रवाह" : "FLUENCY", value: `${score.fluency}%` },
-      { label: language === "hi" ? "गति" : "SPEED", value: `${score.wordsPerMinute} WPM` },
-    ];
-    const columnWidth = size / 3;
-    context.strokeStyle = "rgba(255,255,255,.25)";
-    context.lineWidth = 2;
-    [columnWidth, columnWidth * 2].forEach((x) => {
-      context.beginPath(); context.moveTo(x, 750); context.lineTo(x, 840); context.stroke();
+    downloadScoreCardImage({
+      readerName: savedReader?.name || details.name || (language === "hi" ? "पाठक" : "Reader"),
+      subtitle: passage.title,
+      totalScore: score.total,
+      metrics: [
+        { label: language === "hi" ? "शुद्धता" : "ACCURACY", value: `${score.accuracy}%` },
+        { label: language === "hi" ? "प्रवाह" : "FLUENCY", value: `${score.fluency}%` },
+        { label: language === "hi" ? "गति" : "SPEED", value: `${score.wordsPerMinute} WPM` },
+      ],
+      hindi: language === "hi",
+      filename: "rajkamal-reading-score.png",
     });
-    metrics.forEach((metric, index) => {
-      const x = columnWidth * index + columnWidth / 2;
-      context.fillStyle = "#ffffff";
-      context.font = "900 46px Arial";
-      context.fillText(metric.value, x, 800);
-      context.fillStyle = "rgba(255,255,255,.65)";
-      context.font = "700 22px Arial";
-      context.fillText(metric.label, x, 830);
-    });
-
-    context.fillStyle = "rgba(255,255,255,.7)";
-    context.font = "700 26px Arial";
-    context.fillText(language === "hi" ? "राजकमल प्रकाशन" : "RAJKAMAL PRAKASHAN", centerX, size - 60);
-
-    canvas.toBlob((blob) => {
-      if (!blob) return;
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = "rajkamal-reading-score.png";
-      link.click();
-      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-    }, "image/png");
   }
 
   const field = "mt-1.5 w-full rounded-xl border border-stone-300 bg-white px-3 py-3 outline-none focus:border-[#b42332] focus:ring-2 focus:ring-[#b42332]/15";
@@ -758,7 +695,7 @@ export default function OpenReader({ passages }: Props) {
       <div className="padhaku-intro"><div><p className="padhaku-eyebrow">{language === "hi" ? "हिंदी रीडिंग स्कोर" : "HINDI READING SCORE"}</p><h1>{language === "hi" ? "पढ़िए, रिकॉर्ड कीजिए, स्कोर बढ़ाइए।" : "Read, record, improve your score."}</h1><p>{language === "hi" ? "आज का छोटा हिंदी पाठ अपनी आवाज़ में पढ़ें।" : "Read today’s short Hindi passage in your own voice."}</p></div><button onClick={nextPassage} disabled={busy} className="padhaku-new"><RotateCcw className="size-4" />{t.newPassage}</button></div>
       <div className="padhaku-grid">
         <article className="padhaku-card">
-          <div className="padhaku-title-row"><div><div className="padhaku-kicker"><p>{t.newPassage}</p><span className="padhaku-level">● {passage.difficulty_editorial}</span></div><h2>{passage.title}</h2></div><button onClick={listen} disabled={busy} aria-pressed={samplePlaying} className={samplePlaying ? "speaking" : ""}><span><Volume2 className="size-4" /></span>{samplePlaying ? t.stopListen : t.listen}</button></div>
+          <div className="padhaku-title-row"><div><div className="padhaku-kicker"><p>#{passage.sequence}</p><span className="padhaku-level">● {passage.difficulty_editorial}</span></div><h2>{passage.title}</h2></div><button onClick={listen} disabled={busy} aria-pressed={samplePlaying} className={samplePlaying ? "speaking" : ""}><span><Volume2 className="size-4" /></span>{samplePlaying ? t.stopListen : t.listen}</button></div>
           <div className="padhaku-passage">{passage.lines.map((line) => <p key={line}>{line}</p>)}</div>
           <div className="padhaku-meta"><span>{passage.word_count_whitespace} {language === "hi" ? "शब्द" : "words"}</span><span>{language === "hi" ? "लगभग 1 मिनट" : "about 1 minute"}</span><span>हिंदी</span></div>
           <section className={`padhaku-record ${busy ? "active" : ""}`} aria-live="polite" aria-busy={status === "transcribing"}>
