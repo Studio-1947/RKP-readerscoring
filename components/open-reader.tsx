@@ -1,7 +1,6 @@
 "use client";
 
 import { FormEvent, useEffect, useRef, useState } from "react";
-import Image from "next/image";
 import { ScoreGuide } from "@/components/reading-context";
 import { ReaderDashboard } from "@/components/reader-dashboard";
 import { QuizTab } from "@/components/quiz-tab";
@@ -687,7 +686,7 @@ export default function OpenReader({ passages }: Props) {
 
   return <main className="padhaku-shell min-h-screen pb-24">
     <header className="reader-topbar"><div className="reader-topbar-inner">
-      <div className="flex min-w-0 items-center gap-2.5 sm:gap-3 lg:gap-4"><Image src="/rajkamal-emblem.svg" alt="Rajkamal" width={60} height={60} priority className="size-10 shrink-0 object-contain sm:size-12 lg:size-15" /><p className="reader-chant whitespace-nowrap text-sm font-bold text-[#7e1421] sm:text-lg lg:text-2xl">पढ़ाकू</p></div>
+      <div className="flex min-w-0 items-center gap-2.5 sm:gap-3 lg:gap-4"><p className="reader-chant whitespace-nowrap text-sm font-bold text-[#7e1421] sm:text-lg lg:text-2xl">पढ़ाकू</p></div>
       <nav className="desktop-reader-nav" aria-label={language === "hi" ? "मुख्य नेविगेशन" : "Main navigation"}>{(["practice", "quiz", "leaderboard", "progress", "profile"] as View[]).map((view) => <button key={view} disabled={busy} aria-current={activeView === view ? "page" : undefined} className={activeView === view ? "active" : ""} onClick={() => setActiveView(view)}>{view === "practice" ? (language === "hi" ? "आज का पाठ" : "Today’s reading") : view === "quiz" ? (language === "hi" ? "क्विज़" : "Quiz") : view === "leaderboard" ? (language === "hi" ? "लीडरबोर्ड" : "Leaderboard") : view === "progress" ? (language === "hi" ? "मेरी प्रगति" : "My progress") : (language === "hi" ? "प्रोफ़ाइल" : "Profile")}</button>)}</nav>
       <button disabled={busy} onClick={() => setLanguage(language === "hi" ? "en" : "hi")} className="flex shrink-0 items-center gap-1.5 rounded-xl border border-stone-300 bg-white px-3 py-2 text-xs font-bold text-[#7e1421] sm:gap-2 sm:px-4 sm:text-sm lg:px-5 lg:text-base disabled:cursor-wait disabled:opacity-50"><Languages className="size-3.5 sm:size-4 lg:size-4.5" />{language === "hi" ? "English" : "हिंदी"}</button>
     </div></header>

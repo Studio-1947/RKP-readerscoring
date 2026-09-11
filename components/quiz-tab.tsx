@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useMemo, useState } from "react";
-import { Info, RotateCcw } from "lucide-react";
+import { Check, Info, RotateCcw, X } from "lucide-react";
 import { quizId, quizQuestions, quizTitle } from "@/lib/quiz-data";
 import { loadSavedReaderDetails, saveQuizAttempt, type ReaderDetails } from "@/lib/reader-storage";
 
@@ -20,6 +20,9 @@ function shuffled<T>(items: T[]) {
 
 export function QuizTab({ hindi }: { hindi: boolean }) {
   const questions = useMemo(() => shuffled(quizQuestions).slice(0, 8), []);
+  const [index, setIndex] = useState(0);
+  const [selected, setSelected] = useState<number | null>(null);
+  const [revealed, setRevealed] = useState(false);
   const [answers, setAnswers] = useState<Record<string, number>>({});
   const [stage, setStage] = useState<Stage>("answering");
   const [details, setDetails] = useState<ReaderDetails>(emptyDetails);
@@ -28,24 +31,31 @@ export function QuizTab({ hindi }: { hindi: boolean }) {
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
   const [saved, setSaved] = useState(false);
-  const [correctCount, setCorrectCount] = useState(0);
 
-  const allAnswered = questions.every((question) => answers[question.id] !== undefined);
+  const question = questions[index];
+  const isLast = index === questions.length - 1;
 
-  function pickAnswer(questionId: string, optionIndex: number) {
-    if (stage !== "answering") return;
-    setAnswers((current) => ({ ...current, [questionId]: optionIndex }));
-  }
-
-  function computeScore() {
-    const correct = questions.filter((question) => answers[question.id] === question.correctIndex).length;
+  function computeScore(finalAnswers: Record<string, number>) {
+    const correct = questions.filter((item) => finalAnswers[item.id] === item.correctIndex).length;
     return { correct, total: questions.length, score: Math.round((correct / questions.length) * 100) };
   }
 
-  async function submitQuiz() {
-    if (!allAnswered) return;
-    const { correct, score } = computeScore();
-    setCorrectCount(correct);
+  function pickAnswer(optionIndex: number) {
+    if (revealed) return;
+    setSelected(optionIndex);
+    setRevealed(true);
+    setAnswers((current) => ({ ...current, [question.id]: optionIndex }));
+  }
+
+  async function goNext() {
+    if (!revealed) return;
+    if (!isLast) {
+      setIndex((value) => value + 1);
+      setSelected(null);
+      setRevealed(false);
+      return;
+    }
+    const { correct, score } = computeScore(answers);
     const saved = await loadSavedReaderDetails().catch(() => null);
     if (saved) {
       setDetails(saved);
@@ -79,7 +89,7 @@ export function QuizTab({ hindi }: { hindi: boolean }) {
     }
     setSaveError("");
     setIsSaving(true);
-    const { correct, score } = computeScore();
+    const { correct, score } = computeScore(answers);
     try {
       await saveQuizAttempt({ details, quizId, quizTitle: quizTitle.hi, correctCount: correct, totalQuestions: questions.length, totalScore: score });
       setSaved(true);
@@ -92,17 +102,13 @@ export function QuizTab({ hindi }: { hindi: boolean }) {
   }
 
   function retry() {
-    setAnswers({});
-    setStage("answering");
-    setSaved(false);
-    setSaveError("");
     window.location.reload();
   }
 
   const field = "mt-1.5 w-full rounded-xl border border-stone-300 bg-white px-3 py-3 outline-none focus:border-[#b42332] focus:ring-2 focus:ring-[#b42332]/15";
 
   if (stage === "result") {
-    const { correct, total, score } = computeScore();
+    const { correct, total, score } = computeScore(answers);
     return <section className="padhaku-practice">
       <div className="padhaku-intro"><div><p className="padhaku-eyebrow">{hindi ? "क्विज़ परिणाम" : "QUIZ RESULT"}</p><h1>{hindi ? "शाबाश!" : "Well done!"}</h1></div></div>
       <div className="mt-5 rounded-xl border border-[#e5b043]/70 bg-[#fffaf0] p-5 sm:p-7">
@@ -135,19 +141,28 @@ export function QuizTab({ hindi }: { hindi: boolean }) {
     </section>;
   }
 
-  return <section className="padhaku-practice">
-    <div className="padhaku-intro"><div><p className="padhaku-eyebrow">{hindi ? "हिंदी साहित्य क्विज़" : "HINDI LITERATURE QUIZ"}</p><h1>{hindi ? quizTitle.hi : quizTitle.en}</h1><p>{hindi ? "हिंदी किताबों और लेखकों से जुड़े सवालों के सही जवाब चुनें।" : "Pick the right answers about Hindi books and authors."}</p></div></div>
-    <div className="mt-6 space-y-4">
-      {questions.map((question, index) => <article key={question.id} className="padhaku-card p-5 sm:p-6">
-        <p className="text-xs font-bold tracking-[.1em] text-[#b42332]">{hindi ? `प्रश्न ${index + 1} / ${questions.length}` : `QUESTION ${index + 1} / ${questions.length}`}</p>
-        <h2 className="serif mt-1 text-lg font-bold sm:text-xl">{hindi ? question.question.hi : question.question.en}</h2>
-        <div className="mt-4 grid gap-2 sm:grid-cols-2">
-          {question.options.map((option, optionIndex) => <button type="button" key={optionIndex} onClick={() => pickAnswer(question.id, optionIndex)} className={`rounded-xl border px-4 py-3 text-left text-sm font-semibold transition ${answers[question.id] === optionIndex ? "border-[#b42332] bg-[#b42332] text-white" : "border-stone-300 bg-white text-stone-700 hover:border-[#b42332]/50"}`}>{hindi ? option.hi : option.en}</button>)}
-        </div>
-      </article>)}
+  return <section className="quiz-fullscreen">
+    <div className="quiz-progress"><div style={{ width: `${((index + 1) / questions.length) * 100}%` }} /></div>
+    <div className="quiz-body">
+      <p className="quiz-counter">{hindi ? `प्रश्न ${index + 1} / ${questions.length}` : `QUESTION ${index + 1} / ${questions.length}`}</p>
+      <h1 className="quiz-question">{hindi ? question.question.hi : question.question.en}</h1>
+      <div className="quiz-options">
+        {question.options.map((option, optionIndex) => {
+          const isSelected = selected === optionIndex;
+          const isCorrectOption = optionIndex === question.correctIndex;
+          let stateClass = "";
+          if (revealed && isCorrectOption) stateClass = "quiz-option-correct";
+          else if (revealed && isSelected) stateClass = "quiz-option-wrong";
+          else if (isSelected) stateClass = "quiz-option-selected";
+          return <button type="button" key={optionIndex} disabled={revealed} onClick={() => pickAnswer(optionIndex)} className={`quiz-option ${stateClass}`}>
+            <span>{hindi ? option.hi : option.en}</span>
+            {revealed && isCorrectOption && <Check className="size-5 shrink-0" />}
+            {revealed && isSelected && !isCorrectOption && <X className="size-5 shrink-0" />}
+          </button>;
+        })}
+      </div>
+      {revealed && <p className={`quiz-feedback ${selected === question.correctIndex ? "quiz-feedback-correct" : "quiz-feedback-wrong"}`}>{selected === question.correctIndex ? (hindi ? "सही जवाब!" : "Correct!") : (hindi ? "गलत जवाब।" : "Not quite.")}</p>}
     </div>
-    <div className="mt-6 flex justify-end">
-      <button onClick={submitQuiz} disabled={!allAnswered} className="rounded-full bg-[#b42332] px-6 py-3 text-sm font-bold text-white hover:bg-[#7e1421] disabled:cursor-not-allowed disabled:opacity-50">{hindi ? "क्विज़ जमा करें" : "Submit quiz"}</button>
-    </div>
+    <button onClick={goNext} disabled={!revealed} className="quiz-next">{isLast ? (hindi ? "क्विज़ पूरा करें" : "Finish quiz") : (hindi ? "अगला सवाल" : "Next question")}</button>
   </section>;
 }
