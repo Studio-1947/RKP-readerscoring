@@ -133,6 +133,26 @@ const micLog = (event: string, details: Record<string, unknown> = {}) => {
   console.info(`[Rajkamal Reader][mic] ${event}`, { at: new Date().toISOString(), ...details });
 };
 
+function speechChunks(lines: string[], maxLength = 150) {
+  const sentences = lines.flatMap((line) => line.match(/[^।!?]+[।!?]?/gu) ?? [line]);
+  const chunks: string[] = [];
+  for (const sentence of sentences) {
+    const words = sentence.trim().split(/\s+/u).filter(Boolean);
+    let chunk = "";
+    for (const word of words) {
+      const candidate = chunk ? `${chunk} ${word}` : word;
+      if (chunk && candidate.length > maxLength) {
+        chunks.push(chunk);
+        chunk = word;
+      } else {
+        chunk = candidate;
+      }
+    }
+    if (chunk) chunks.push(chunk);
+  }
+  return chunks;
+}
+
 export default function OpenReader({ passages }: Props) {
   const [language, setLanguage] = useState<Language>("hi");
   const [activeView, setActiveView] = useState<View>("practice");
@@ -237,6 +257,8 @@ export default function OpenReader({ passages }: Props) {
     microphoneStream.current = null;
     browserRecognition.current?.abort();
     browserRecognition.current = null;
+    listeningToken.current += 1;
+    listening.current = false;
     window.speechSynthesis?.cancel();
   }, []);
 
@@ -498,7 +520,7 @@ export default function OpenReader({ passages }: Props) {
 
   function listen() {
     const synth = window.speechSynthesis;
-    if (!synth) { setError(t.voiceError); return; }
+    if (!synth || typeof SpeechSynthesisUtterance === "undefined") { setError(t.voiceError); return; }
     if (listening.current || samplePlaying) {
       listeningToken.current += 1;
       listening.current = false;
@@ -508,34 +530,40 @@ export default function OpenReader({ passages }: Props) {
     }
     const token = listeningToken.current + 1;
     listeningToken.current = token;
+    listening.current = true;
+    setSamplePlaying(true);
+    setError("");
     synth.cancel();
-    const utterance = new SpeechSynthesisUtterance(passage.reference_text);
-    utterance.lang = "hi-IN"; utterance.rate = 0.82; utterance.pitch = 1;
-    utterance.voice = synth.getVoices().find((voice) => voice.lang.toLowerCase() === "hi-in")
-      ?? synth.getVoices().find((voice) => voice.lang.toLowerCase().startsWith("hi"))
-      ?? null;
+    if (synth.paused) synth.resume();
+    const chunks = speechChunks(passage.lines);
+    let chunkIndex = 0;
     const stop = () => {
       if (listeningToken.current !== token) return;
       listening.current = false;
       setSamplePlaying(false);
     };
-    utterance.onstart = () => {
+    const speakNext = () => {
       if (listeningToken.current !== token) return;
-      listening.current = true;
-      setSamplePlaying(true);
+      const text = chunks[chunkIndex];
+      if (!text) { stop(); return; }
+      chunkIndex += 1;
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.lang = "hi-IN";
+      utterance.rate = 0.82;
+      utterance.pitch = 1;
+      const voices = synth.getVoices();
+      utterance.voice = voices.find((voice) => voice.lang.toLowerCase() === "hi-in")
+        ?? voices.find((voice) => voice.lang.toLowerCase().startsWith("hi"))
+        ?? null;
+      utterance.onend = () => window.setTimeout(speakNext, 35);
+      utterance.onerror = (event) => {
+        if (listeningToken.current !== token || event.error === "canceled" || event.error === "interrupted") return;
+        stop();
+        setError(t.voiceError);
+      };
+      synth.speak(utterance);
     };
-    utterance.onend = stop;
-    utterance.onerror = () => {
-      stop();
-      if (listeningToken.current === token) setError(t.voiceError);
-    };
-    synth.speak(utterance);
-    // Chrome occasionally leaves synthesis paused after cancelling a prior utterance.
-    window.setTimeout(() => {
-      if (listeningToken.current === token && synth.paused) synth.resume();
-    }, 80);
-    listening.current = true;
-    setSamplePlaying(true);
+    speakNext();
   }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -617,7 +645,7 @@ export default function OpenReader({ passages }: Props) {
       <div className="padhaku-grid">
         <article className="padhaku-card">
           <div className="padhaku-card-head"><div><span>{language === "hi" ? "पाठ" : "PASSAGE"} {passage.sequence} / {passages.length}</span><span className="padhaku-level">● {passage.difficulty_editorial}</span></div><i><b style={{ width: `${(passage.sequence / passages.length) * 100}%` }} /></i></div>
-          <div className="padhaku-title-row"><div><p>{t.newPassage}</p><h2>{passage.title}</h2></div><button onClick={listen} disabled={busy} className={samplePlaying ? "speaking" : ""}><span><Volume2 className="size-4" /></span>{samplePlaying ? t.stopListen : t.listen}</button></div>
+          <div className="padhaku-title-row"><div><p>{t.newPassage}</p><h2>{passage.title}</h2></div><button onClick={listen} disabled={busy} aria-pressed={samplePlaying} className={samplePlaying ? "speaking" : ""}><span><Volume2 className="size-4" /></span>{samplePlaying ? t.stopListen : t.listen}</button></div>
           <div className="padhaku-passage">{passage.lines.map((line) => <p key={line}>{line}</p>)}</div>
           <div className="padhaku-meta"><span>{passage.word_count_whitespace} {language === "hi" ? "शब्द" : "words"}</span><span>{language === "hi" ? "लगभग 1 मिनट" : "about 1 minute"}</span><span>हिंदी</span></div>
           <section className={`padhaku-record ${busy ? "active" : ""}`} aria-live="polite" aria-busy={status === "transcribing"}>
