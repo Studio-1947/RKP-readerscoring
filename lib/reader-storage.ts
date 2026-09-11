@@ -10,6 +10,30 @@ export type ReaderDetails = {
   leaderboardOptIn?: boolean;
 };
 
+export async function loadSavedReaderDetails(): Promise<ReaderDetails | null> {
+  const supabase = createClient();
+  const { data: auth, error: authError } = await supabase.auth.getUser();
+  if (authError && authError.name !== "AuthSessionMissingError") throw authError;
+  if (!auth.user) return null;
+
+  const { data, error } = await supabase
+    .from("reader_profiles")
+    .select("full_name,age,phone,email,place,leaderboard_opt_in")
+    .eq("id", auth.user.id)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) return null;
+
+  return {
+    name: data.full_name,
+    age: String(data.age),
+    phone: data.phone,
+    email: data.email ?? "",
+    place: data.place,
+    leaderboardOptIn: data.leaderboard_opt_in === true,
+  };
+}
+
 type SaveAttemptInput = {
   details: ReaderDetails;
   passage: { id: string; title: string; sequence: number };
@@ -19,7 +43,7 @@ type SaveAttemptInput = {
   scoringSource?: "browser" | "server";
 };
 
-async function getAnonymousReaderId(details: ReaderDetails) {
+export async function getAnonymousReaderId(details: ReaderDetails) {
   const supabase = createClient();
   const { data: currentUser, error: currentUserError } = await supabase.auth.getUser();
   if (currentUserError && currentUserError.name !== "AuthSessionMissingError") throw currentUserError;
@@ -77,6 +101,42 @@ export async function saveReaderAttempt(input: SaveAttemptInput) {
     words_per_minute: score.wordsPerMinute,
     total_score: score.total,
     scoring_source: scoringSource,
+  });
+  if (attemptError) throw attemptError;
+}
+
+type SaveQuizAttemptInput = {
+  details: ReaderDetails;
+  quizId: string;
+  quizTitle: string;
+  correctCount: number;
+  totalQuestions: number;
+  totalScore: number;
+};
+
+export async function saveQuizAttempt(input: SaveQuizAttemptInput) {
+  const { details, quizId, quizTitle, correctCount, totalQuestions, totalScore } = input;
+  const { supabase, userId } = await getAnonymousReaderId(details);
+
+  const { error: profileError } = await supabase.from("reader_profiles").upsert({
+    id: userId,
+    full_name: details.name.trim(),
+    age: Number(details.age),
+    phone: details.phone.trim(),
+    email: details.email.trim() || null,
+    place: details.place.trim(),
+    consented_at: new Date().toISOString(),
+    leaderboard_opt_in: details.leaderboardOptIn === true,
+  });
+  if (profileError) throw profileError;
+
+  const { error: attemptError } = await supabase.from("quiz_attempts").insert({
+    reader_id: userId,
+    quiz_id: quizId,
+    quiz_title: quizTitle,
+    correct_count: correctCount,
+    total_questions: totalQuestions,
+    total_score: totalScore,
   });
   if (attemptError) throw attemptError;
 }

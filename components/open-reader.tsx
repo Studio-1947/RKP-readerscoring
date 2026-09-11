@@ -4,17 +4,19 @@ import { FormEvent, useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import { ScoreGuide } from "@/components/reading-context";
 import { ReaderDashboard } from "@/components/reader-dashboard";
+import { QuizTab } from "@/components/quiz-tab";
 import { Info, Languages, Mic, Play, RotateCcw, Share2, Timer, Volume2, X } from "lucide-react";
 import { ReadingScore, scoreReading } from "@/lib/scoring";
-import { saveReaderAttempt } from "@/lib/reader-storage";
+import { loadSavedReaderDetails, saveReaderAttempt } from "@/lib/reader-storage";
 import { createClient } from "@/utils/supabase/client";
 
 type Language = "hi" | "en";
-type View = "practice" | "leaderboard" | "progress";
+type View = "practice" | "quiz" | "leaderboard" | "progress";
 type Status = "ready" | "recording" | "transcribing" | "details" | "result" | "unsupported";
 type Passage = { id: string; sequence: number; title: string; difficulty_editorial: string; lines: string[]; reference_text: string; word_count_whitespace: number };
 type Details = { name: string; age: string; phone: string; email: string; place: string; consent: boolean; leaderboardOptIn: boolean };
 type Leader = { reader_label: string; best_score: number };
+type StreakStats = { current: number; weekly: number; monthly: number };
 type Props = { passages: Passage[] };
 type TranscriptSource = "browser" | "server";
 const MAX_RECORDING_SECONDS = 90;
@@ -129,6 +131,25 @@ const copy = {
 
 const emptyScore: ReadingScore = { total: 0, accuracy: 0, fluency: 0, completion: 0, consistency: 0, wordsRead: 0, expectedWords: 0, wordsPerMinute: 0, xp: 0 };
 
+function calculateStreakStats(timestamps: string[]): StreakStats {
+  const dateKey = (date: Date) => date.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+  const activeDays = new Set(timestamps.map(value => dateKey(new Date(value))));
+  const today = new Date();
+  const day = new Date(today);
+  if (!activeDays.has(dateKey(day))) day.setDate(day.getDate() - 1);
+  let current = 0;
+  while (activeDays.has(dateKey(day))) {
+    current += 1;
+    day.setDate(day.getDate() - 1);
+  }
+  const monday = new Date(today);
+  monday.setHours(0, 0, 0, 0);
+  monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+  const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+  const dates = [...activeDays].map(value => new Date(`${value}T00:00:00+05:30`));
+  return { current, weekly: dates.filter(value => value >= monday && value <= today).length, monthly: dates.filter(value => value >= monthStart && value <= today).length };
+}
+
 const micLog = (event: string, details: Record<string, unknown> = {}) => {
   console.info(`[Rajkamal Reader][mic] ${event}`, { at: new Date().toISOString(), ...details });
 };
@@ -178,6 +199,8 @@ export default function OpenReader({ passages }: Props) {
   const [details, setDetails] = useState<Details>({ name: "", age: "", phone: "", email: "", place: "", consent: false, leaderboardOptIn: true });
   const [errors, setErrors] = useState<Partial<Record<keyof Details, string>>>({});
   const [topLeaders, setTopLeaders] = useState<Leader[]>([]);
+  const [savedReader, setSavedReader] = useState<Details | null>(null);
+  const [streakStats, setStreakStats] = useState<StreakStats>({ current: 0, weekly: 0, monthly: 0 });
   const mediaRecorder = useRef<MediaRecorder | null>(null);
   const microphoneStream = useRef<MediaStream | null>(null);
   const microphoneStarting = useRef(false);
@@ -190,6 +213,7 @@ export default function OpenReader({ passages }: Props) {
   const listening = useRef(false);
   const startedAt = useRef(0);
   const attempts = useRef(0);
+  const savedReaderRef = useRef<Details | null>(null);
 
   const passage = passages[index];
   const t = copy[language];
@@ -226,10 +250,36 @@ export default function OpenReader({ passages }: Props) {
 
   useEffect(() => {
     let cancelled = false;
+    async function restoreReader() {
+      try {
+        const saved = await loadSavedReaderDetails();
+        if (cancelled || !saved) return;
+        const restored: Details = { ...saved, consent: true, leaderboardOptIn: saved.leaderboardOptIn === true };
+        savedReaderRef.current = restored;
+        setSavedReader(restored);
+        setDetails(restored);
+      } catch {
+        // A missing/expired anonymous session simply behaves like a new reader.
+      }
+    }
+    void restoreReader();
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
     async function loadLeaders() {
       try {
-        const { data } = await createClient().rpc("practice_leaderboard");
+        const supabase = createClient();
+        const [{ data }, { data: auth }] = await Promise.all([
+          supabase.rpc("practice_leaderboard"),
+          supabase.auth.getUser(),
+        ]);
         if (!cancelled) setTopLeaders((data ?? []).slice(0, 3));
+        if (auth.user) {
+          const { data: history } = await supabase.from("reading_attempts").select("created_at").order("created_at", { ascending: false }).limit(370);
+          if (!cancelled && history) setStreakStats(calculateStreakStats(history.map(row => row.created_at)));
+        }
       } catch {
         if (!cancelled) setTopLeaders([]);
       }
@@ -461,18 +511,36 @@ export default function OpenReader({ passages }: Props) {
           if (!text) throw new Error("No speech was recognized");
           setTranscript(text);
           setTranscriptSource("server");
-          setScore(scoreReading(passage.reference_text, text, duration, attempts.current));
+          const nextScore = scoreReading(passage.reference_text, text, duration, attempts.current);
+          setScore(nextScore);
           setError("");
-          setStatus("details");
+          const returningReader = savedReaderRef.current;
+          if (returningReader) {
+            setIsSaving(true);
+            await saveReaderAttempt({ details: { ...returningReader, leaderboardOptIn: returningReader.leaderboardOptIn && true }, passage, transcript: text, durationSeconds: duration, score: nextScore, scoringSource: "server" });
+            setStatus("result");
+            setIsSaving(false);
+          } else {
+            setStatus("details");
+          }
         } catch (caught) {
           console.error("[Rajkamal Reader][mic] Speechmatics transcription failed", caught);
           const fallback = browserLatestTranscript.current.trim();
           if (fallback) {
             setTranscript(fallback);
             setTranscriptSource("browser");
-            setScore(scoreReading(passage.reference_text, fallback, duration, attempts.current));
+            const nextScore = scoreReading(passage.reference_text, fallback, duration, attempts.current);
+            setScore(nextScore);
             setError(language === "hi" ? "सर्वर उपलब्ध नहीं था—यह browser का अनुमानित अभ्यास स्कोर है।" : "The server was unavailable—this is an unverified browser practice score.");
-            setStatus("details");
+            const returningReader = savedReaderRef.current;
+            if (returningReader) {
+              setIsSaving(true);
+              await saveReaderAttempt({ details: { ...returningReader, leaderboardOptIn: false }, passage, transcript: fallback, durationSeconds: duration, score: nextScore, scoringSource: "browser" });
+              setStatus("result");
+              setIsSaving(false);
+            } else {
+              setStatus("details");
+            }
           } else {
             setError(caught instanceof Error ? caught.message : t.processingError);
             setStatus("ready");
@@ -581,6 +649,9 @@ export default function OpenReader({ passages }: Props) {
     setIsSaving(true); setError("");
     try {
       await saveReaderAttempt({ details: { ...details, leaderboardOptIn: transcriptSource === "server" && details.leaderboardOptIn }, passage, transcript, durationSeconds: seconds, score, scoringSource: transcriptSource });
+      const persisted = { ...details, leaderboardOptIn: transcriptSource === "server" && details.leaderboardOptIn };
+      savedReaderRef.current = persisted;
+      setSavedReader(persisted);
       setStatus("result");
     } catch {
       setError(language === "hi" ? "आपके विवरण save नहीं हो पाए। Supabase setup और internet connection जाँचें।" : "We could not save your result. Check the Supabase setup and internet connection.");
@@ -635,17 +706,16 @@ export default function OpenReader({ passages }: Props) {
   const statusHelp = recording ? t.recordingHelp : status === "transcribing" ? (transcriptionStatus || t.transcribingHelp) : t.help;
 
   return <main className="padhaku-shell min-h-screen pb-24">
-    <header className="reader-topbar"><div className="mx-auto flex max-w-6xl items-center justify-between gap-3">
-      <div className="flex min-w-0 items-center gap-2.5 sm:gap-3 lg:gap-4"><Image src="/rajkamal-emblem.svg" alt="Rajkamal" width={60} height={60} priority className="size-10 shrink-0 object-contain sm:size-12 lg:size-15" /><p className="reader-chant whitespace-nowrap text-sm font-bold text-[#7e1421] sm:text-lg lg:text-2xl" aria-label="साथ जुड़ें, साथ पढ़ें"><span>साथ </span><span className="flip-word"><span className="flip-word-sizer" aria-hidden="true">जुड़ें</span><span className="flip-word-sizer" aria-hidden="true">पढ़ें</span><span className="flip-word-item" aria-hidden="true">जुड़ें</span><span className="flip-word-item flip-word-delayed" aria-hidden="true">पढ़ें</span></span></p></div>
-      <nav className="desktop-reader-nav" aria-label={language === "hi" ? "मुख्य नेविगेशन" : "Main navigation"}>{(["practice", "leaderboard", "progress"] as View[]).map((view) => <button key={view} disabled={busy} aria-current={activeView === view ? "page" : undefined} className={activeView === view ? "active" : ""} onClick={() => setActiveView(view)}>{view === "practice" ? (language === "hi" ? "आज का पाठ" : "Today’s reading") : view === "leaderboard" ? (language === "hi" ? "लीडरबोर्ड" : "Leaderboard") : (language === "hi" ? "मेरी प्रगति" : "My progress")}</button>)}</nav>
+    <header className="reader-topbar"><div className="reader-topbar-inner">
+      <div className="flex min-w-0 items-center gap-2.5 sm:gap-3 lg:gap-4"><Image src="/rajkamal-emblem.svg" alt="Rajkamal" width={60} height={60} priority className="size-10 shrink-0 object-contain sm:size-12 lg:size-15" /><p className="reader-chant whitespace-nowrap text-sm font-bold text-[#7e1421] sm:text-lg lg:text-2xl">पढ़ाकू क्लब</p></div>
+      <nav className="desktop-reader-nav" aria-label={language === "hi" ? "मुख्य नेविगेशन" : "Main navigation"}>{(["practice", "quiz", "leaderboard", "progress"] as View[]).map((view) => <button key={view} disabled={busy} aria-current={activeView === view ? "page" : undefined} className={activeView === view ? "active" : ""} onClick={() => setActiveView(view)}>{view === "practice" ? (language === "hi" ? "आज का पाठ" : "Today’s reading") : view === "quiz" ? (language === "hi" ? "क्विज़" : "Quiz") : view === "leaderboard" ? (language === "hi" ? "लीडरबोर्ड" : "Leaderboard") : (language === "hi" ? "मेरी प्रगति" : "My progress")}</button>)}</nav>
       <button disabled={busy} onClick={() => setLanguage(language === "hi" ? "en" : "hi")} className="flex shrink-0 items-center gap-1.5 rounded-xl border border-stone-300 bg-white px-3 py-2 text-xs font-bold text-[#7e1421] sm:gap-2 sm:px-4 sm:text-sm lg:px-5 lg:text-base disabled:cursor-wait disabled:opacity-50"><Languages className="size-3.5 sm:size-4 lg:size-4.5" />{language === "hi" ? "English" : "हिंदी"}</button>
     </div></header>
     {activeView === "practice" ? <section className="padhaku-practice">
       <div className="padhaku-intro"><div><p className="padhaku-eyebrow">{language === "hi" ? "हिंदी रीडिंग स्कोर" : "HINDI READING SCORE"}</p><h1>{language === "hi" ? "पढ़िए, रिकॉर्ड कीजिए, स्कोर बढ़ाइए।" : "Read, record, improve your score."}</h1><p>{language === "hi" ? "आज का छोटा हिंदी पाठ अपनी आवाज़ में पढ़ें।" : "Read today’s short Hindi passage in your own voice."}</p></div><button onClick={nextPassage} disabled={busy} className="padhaku-new"><RotateCcw className="size-4" />{t.newPassage}</button></div>
       <div className="padhaku-grid">
         <article className="padhaku-card">
-          <div className="padhaku-card-head"><div><span>{language === "hi" ? "पाठ" : "PASSAGE"} {passage.sequence} / {passages.length}</span><span className="padhaku-level">● {passage.difficulty_editorial}</span></div><i><b style={{ width: `${(passage.sequence / passages.length) * 100}%` }} /></i></div>
-          <div className="padhaku-title-row"><div><p>{t.newPassage}</p><h2>{passage.title}</h2></div><button onClick={listen} disabled={busy} aria-pressed={samplePlaying} className={samplePlaying ? "speaking" : ""}><span><Volume2 className="size-4" /></span>{samplePlaying ? t.stopListen : t.listen}</button></div>
+          <div className="padhaku-title-row"><div><div className="padhaku-kicker"><p>{t.newPassage}</p><span className="padhaku-level">● {passage.difficulty_editorial}</span></div><h2>{passage.title}</h2></div><button onClick={listen} disabled={busy} aria-pressed={samplePlaying} className={samplePlaying ? "speaking" : ""}><span><Volume2 className="size-4" /></span>{samplePlaying ? t.stopListen : t.listen}</button></div>
           <div className="padhaku-passage">{passage.lines.map((line) => <p key={line}>{line}</p>)}</div>
           <div className="padhaku-meta"><span>{passage.word_count_whitespace} {language === "hi" ? "शब्द" : "words"}</span><span>{language === "hi" ? "लगभग 1 मिनट" : "about 1 minute"}</span><span>हिंदी</span></div>
           <section className={`padhaku-record ${busy ? "active" : ""}`} aria-live="polite" aria-busy={status === "transcribing"}>
@@ -665,7 +735,7 @@ export default function OpenReader({ passages }: Props) {
         </article>
         <aside className="padhaku-side">
           <section className="padhaku-leader"><div className="padhaku-side-title"><div><p>{language === "hi" ? "इस हफ्ते" : "THIS WEEK"}</p><h2>{language === "hi" ? "लीडरबोर्ड" : "Leaderboard"}</h2></div><Info className="size-5" aria-hidden="true" /></div><div className="padhaku-ranks">{topLeaders.length ? topLeaders.map((row, i) => <p key={`${i}-${row.reader_label}`}><span>{i + 1}</span><strong>{row.reader_label}</strong><b>{row.best_score}</b></p>) : <div className="padhaku-ranks-empty">{language === "hi" ? "अभी कोई सत्यापित स्कोर नहीं है।" : "No verified scores yet."}</div>}</div><button disabled={busy} onClick={() => setActiveView("leaderboard")}>{language === "hi" ? "पूरी सूची देखें →" : "View full leaderboard →"}</button></section>
-          <section className="padhaku-streak"><p>{language === "hi" ? "राजकमल रीडिंग रिवार्ड्स" : "RAJKAMAL READING REWARDS"}</p><div><h2>{language === "hi" ? "अपनी रीडिंग स्ट्रीक बनाएँ" : "Build your reading streak"}</h2><span aria-hidden="true">🔥</span></div><i><b /></i><p>{language === "hi" ? "हर दिन एक नया पाठ पढ़ें और अपनी प्रगति देखें।" : "Read a new passage every day and follow your progress."}</p><button disabled={busy} onClick={() => setActiveView("progress")}>{language === "hi" ? "अपनी प्रगति देखें →" : "View your progress →"}</button></section>
+          <section className="padhaku-streak"><p>{language === "hi" ? "पढ़ाकू क्लब स्ट्रीक" : "PADHAKU CLUB STREAK"}</p><div><h2>{streakStats.current ? `${streakStats.current} ${language === "hi" ? "दिन की स्ट्रीक" : "day streak"}` : (language === "hi" ? "आज से स्ट्रीक शुरू करें" : "Start your streak today")}</h2><span aria-hidden="true">🔥</span></div><div className="streak-periods"><article><b>{streakStats.weekly}/7</b><span>{language === "hi" ? "इस हफ्ते" : "This week"}</span></article><article><b>{streakStats.monthly}</b><span>{language === "hi" ? "इस महीने" : "This month"}</span></article></div><i><b style={{ width: `${(streakStats.weekly / 7) * 100}%` }} /></i><p>{savedReader ? (language === "hi" ? "आपकी अगली रीडिंग अपने-आप स्कोर और सेव होगी।" : "Your next reading will be scored and saved automatically.") : (language === "hi" ? "पहला स्कोर सेव करने के बाद आपकी पहचान अपने-आप हो जाएगी।" : "After saving your first score, you’ll be recognized automatically.")}</p><button disabled={busy} onClick={() => setActiveView("progress")}>{language === "hi" ? "अपनी प्रगति देखें →" : "View your progress →"}</button></section>
           <ScoreGuide hindi={language === "hi"} />
         </aside>
       </div>
@@ -699,8 +769,8 @@ export default function OpenReader({ passages }: Props) {
         </section>
       </div>}
       {status === "result" && <section className="mt-5 rounded-xl border border-[#e5b043]/70 bg-[#fffaf0] p-5  sm:p-7"><div className="flex flex-col justify-between gap-5 sm:flex-row sm:items-start"><div><p className="flex items-center gap-2 text-xs font-bold tracking-[.16em] text-[#b42332]">{t.result}</p><h2 className="serif mt-2 text-3xl font-bold">{t.great}</h2></div><div className="rounded-2xl bg-[#b42332] px-6 py-4 text-center text-white"><p className="text-xs font-bold uppercase tracking-widest text-white/70">{t.score}</p><p className="serif text-4xl font-bold">{score.total}<span className="text-lg text-white/70">/100</span></p></div></div><div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4"><Metric label={t.accuracy} value={`${score.accuracy}%`} /><Metric label={t.fluency} value={`${score.fluency}%`} /><Metric label={t.completion} value={`${score.completion}%`} /><Metric label={t.speed} value={`${score.wordsPerMinute} WPM`} /></div><div className="mt-6 flex flex-col gap-3 border-t border-[#eadabb] pt-5 sm:flex-row"><button onClick={resetAttempt} className="flex flex-1 items-center justify-center gap-2 rounded-full border border-[#b42332] px-4 py-3 text-sm font-bold text-[#b42332]"><RotateCcw className="size-4" />{t.retry}</button><button onClick={downloadScoreCard} className="flex flex-1 items-center justify-center rounded-full border border-[#b42332] px-4 py-3 text-sm font-bold text-[#b42332]">{language === "hi" ? "स्कोर कार्ड डाउनलोड" : "Download score card"}</button><button onClick={share} className="flex flex-1 items-center justify-center gap-2 rounded-full bg-[#b42332] px-4 py-3 text-sm font-bold text-white"><Share2 className="size-4" />{t.share}</button></div></section>}
-    </section> : <ReaderDashboard view={activeView} hindi={language === "hi"} refresh={status} onPractice={() => setActiveView("practice")} />}
-    {status !== "details" && <nav className="mobile-reader-nav" aria-label={language === "hi" ? "मोबाइल नेविगेशन" : "Mobile navigation"}>{(["practice", "leaderboard", "progress"] as View[]).map((view) => <button key={view} disabled={busy} aria-current={activeView === view ? "page" : undefined} className={activeView === view ? "active" : ""} onClick={() => setActiveView(view)}>{view === "practice" ? (language === "hi" ? "पाठ" : "Read") : view === "leaderboard" ? (language === "hi" ? "सूची" : "Leaders") : (language === "hi" ? "प्रगति" : "Progress")}</button>)}</nav>}
+    </section> : activeView === "quiz" ? <QuizTab hindi={language === "hi"} /> : <ReaderDashboard view={activeView} hindi={language === "hi"} refresh={status} onPractice={() => setActiveView("practice")} />}
+    {status !== "details" && <nav className="mobile-reader-nav" aria-label={language === "hi" ? "मोबाइल नेविगेशन" : "Mobile navigation"}>{(["practice", "quiz", "leaderboard", "progress"] as View[]).map((view) => <button key={view} disabled={busy} aria-current={activeView === view ? "page" : undefined} className={activeView === view ? "active" : ""} onClick={() => setActiveView(view)}>{view === "practice" ? (language === "hi" ? "पाठ" : "Read") : view === "quiz" ? (language === "hi" ? "क्विज़" : "Quiz") : view === "leaderboard" ? (language === "hi" ? "सूची" : "Leaders") : (language === "hi" ? "प्रगति" : "Progress")}</button>)}</nav>}
   </main>;
 }
 
