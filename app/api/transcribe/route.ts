@@ -167,6 +167,7 @@ export async function POST(request: Request) {
             ? "Speechmatics transcription timed out. Please try a shorter recording."
             : "Speechmatics could not process this recording.",
         code: noSpeech ? "NO_SPEECH" : timedOut ? "SPEECHMATICS_TIMEOUT" : "SPEECHMATICS_FAILED",
+        detail: noSpeech ? undefined : message.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim().slice(0, 240),
         requestId,
       },
       { status: noSpeech ? 422 : timedOut ? 504 : 502 },
