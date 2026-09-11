@@ -105,6 +105,16 @@ export async function saveReaderAttempt(input: SaveAttemptInput) {
   if (attemptError) throw attemptError;
 }
 
+export async function updateLeaderboardOptIn(optIn: boolean) {
+  const supabase = createClient();
+  const { data: auth, error: authError } = await supabase.auth.getUser();
+  if (authError && authError.name !== "AuthSessionMissingError") throw authError;
+  if (!auth.user) throw new Error("No reader session found.");
+
+  const { error } = await supabase.from("reader_profiles").update({ leaderboard_opt_in: optIn }).eq("id", auth.user.id);
+  if (error) throw error;
+}
+
 type SaveQuizAttemptInput = {
   details: ReaderDetails;
   quizId: string;
