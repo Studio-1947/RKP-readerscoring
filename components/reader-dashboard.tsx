@@ -49,6 +49,7 @@ export function ReaderDashboard({ view, hindi, refresh, onPractice }: {
   const [leaders, setLeaders] = useState<Leader[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -89,7 +90,7 @@ export function ReaderDashboard({ view, hindi, refresh, onPractice }: {
     }
     void load();
     return () => { cancelled = true; };
-  }, [refresh]);
+  }, [refresh, reloadKey]);
 
   const summary = useMemo(() => {
     const latest = attempts.at(-1);
@@ -98,8 +99,8 @@ export function ReaderDashboard({ view, hindi, refresh, onPractice }: {
     return { latest, best, average, streak: streakDays(attempts) };
   }, [attempts]);
 
-  if (loading) return <section className="dashboard-empty">{hindi ? "डेटा लोड हो रहा है…" : "Loading your reading data…"}</section>;
-  if (loadError) return <section className="dashboard-empty">{hindi ? "रीडिंग डेटा अभी उपलब्ध नहीं है। कृपया दोबारा कोशिश करें।" : "Reading data is temporarily unavailable. Please try again."}</section>;
+  if (loading) return <section className="dashboard-empty" role="status"><span className="dashboard-spinner" aria-hidden="true" />{hindi ? "डेटा लोड हो रहा है…" : "Loading your reading data…"}</section>;
+  if (loadError) return <section className="dashboard-empty" role="alert"><p>{hindi ? "रीडिंग डेटा अभी उपलब्ध नहीं है। कृपया दोबारा कोशिश करें।" : "Reading data is temporarily unavailable. Please try again."}</p><button onClick={() => setReloadKey(value => value + 1)}>{hindi ? "फिर कोशिश करें" : "Try again"}</button></section>;
 
   if (view === "leaderboard") {
     const average = leaders.length ? Math.round(leaders.reduce((sum, row) => sum + row.best_score, 0) / leaders.length) : 0;

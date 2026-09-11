@@ -144,6 +144,7 @@ export default function OpenReader({ passages }: Props) {
   const [error, setError] = useState("");
   const [samplePlaying, setSamplePlaying] = useState(false);
   const [transcriptionStatus, setTranscriptionStatus] = useState("");
+  const [transcriptionSeconds, setTranscriptionSeconds] = useState(0);
   const [transcriptSource, setTranscriptSource] = useState<TranscriptSource>("browser");
   const [isSaving, setIsSaving] = useState(false);
   const [browserHint, setBrowserHint] = useState("");
@@ -181,6 +182,27 @@ export default function OpenReader({ passages }: Props) {
     const timer = window.setInterval(() => setSeconds(Math.floor((Date.now() - startedAt.current) / 1000)), 500);
     return () => window.clearInterval(timer);
   }, [recording]);
+
+  useEffect(() => {
+    if (status !== "transcribing") return;
+    const started = Date.now();
+    const timer = window.setInterval(() => setTranscriptionSeconds(Math.floor((Date.now() - started) / 1000)), 1000);
+    return () => window.clearInterval(timer);
+  }, [status]);
+
+  useEffect(() => {
+    if (status !== "details") return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") resetAttempt();
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [status]);
 
   useEffect(() => {
     let cancelled = false;
@@ -459,6 +481,7 @@ export default function OpenReader({ passages }: Props) {
       recordingTimeout.current = null;
     }
     micLog("finish requested by reader");
+    setTranscriptionSeconds(0);
     setStatus("transcribing");
     if (recognitionRestart.current) clearTimeout(recognitionRestart.current);
     try { browserRecognition.current?.stop(); }
@@ -586,8 +609,8 @@ export default function OpenReader({ passages }: Props) {
   return <main className="padhaku-shell min-h-screen pb-24">
     <header className="reader-topbar"><div className="mx-auto flex max-w-6xl items-center justify-between gap-3">
       <div className="flex min-w-0 items-center gap-2.5 sm:gap-3 lg:gap-4"><Image src="/rajkamal-emblem.svg" alt="Rajkamal" width={60} height={60} priority className="size-10 shrink-0 object-contain sm:size-12 lg:size-15" /><p className="reader-chant whitespace-nowrap text-sm font-bold text-[#7e1421] sm:text-lg lg:text-2xl" aria-label="साथ जुड़ें, साथ पढ़ें"><span>साथ </span><span className="flip-word"><span className="flip-word-sizer" aria-hidden="true">जुड़ें</span><span className="flip-word-sizer" aria-hidden="true">पढ़ें</span><span className="flip-word-item" aria-hidden="true">जुड़ें</span><span className="flip-word-item flip-word-delayed" aria-hidden="true">पढ़ें</span></span></p></div>
-      <nav className="desktop-reader-nav" aria-label={language === "hi" ? "मुख्य नेविगेशन" : "Main navigation"}>{(["practice", "leaderboard", "progress"] as View[]).map((view) => <button key={view} className={activeView === view ? "active" : ""} onClick={() => setActiveView(view)}>{view === "practice" ? (language === "hi" ? "आज का पाठ" : "Today’s reading") : view === "leaderboard" ? (language === "hi" ? "लीडरबोर्ड" : "Leaderboard") : (language === "hi" ? "मेरी प्रगति" : "My progress")}</button>)}</nav>
-      <button onClick={() => setLanguage(language === "hi" ? "en" : "hi")} className="flex shrink-0 items-center gap-1.5 rounded-xl border border-stone-300 bg-white px-3 py-2 text-xs font-bold text-[#7e1421] sm:gap-2 sm:px-4 sm:text-sm lg:px-5 lg:text-base"><Languages className="size-3.5 sm:size-4 lg:size-4.5" />{language === "hi" ? "English" : "हिंदी"}</button>
+      <nav className="desktop-reader-nav" aria-label={language === "hi" ? "मुख्य नेविगेशन" : "Main navigation"}>{(["practice", "leaderboard", "progress"] as View[]).map((view) => <button key={view} disabled={busy} aria-current={activeView === view ? "page" : undefined} className={activeView === view ? "active" : ""} onClick={() => setActiveView(view)}>{view === "practice" ? (language === "hi" ? "आज का पाठ" : "Today’s reading") : view === "leaderboard" ? (language === "hi" ? "लीडरबोर्ड" : "Leaderboard") : (language === "hi" ? "मेरी प्रगति" : "My progress")}</button>)}</nav>
+      <button disabled={busy} onClick={() => setLanguage(language === "hi" ? "en" : "hi")} className="flex shrink-0 items-center gap-1.5 rounded-xl border border-stone-300 bg-white px-3 py-2 text-xs font-bold text-[#7e1421] sm:gap-2 sm:px-4 sm:text-sm lg:px-5 lg:text-base disabled:cursor-wait disabled:opacity-50"><Languages className="size-3.5 sm:size-4 lg:size-4.5" />{language === "hi" ? "English" : "हिंदी"}</button>
     </div></header>
     {activeView === "practice" ? <section className="padhaku-practice">
       <div className="padhaku-intro"><div><p className="padhaku-eyebrow">{language === "hi" ? "हिंदी रीडिंग स्कोर" : "HINDI READING SCORE"}</p><h1>{language === "hi" ? "पढ़िए, रिकॉर्ड कीजिए, स्कोर बढ़ाइए।" : "Read, record, improve your score."}</h1><p>{language === "hi" ? "आज का छोटा हिंदी पाठ अपनी आवाज़ में पढ़ें।" : "Read today’s short Hindi passage in your own voice."}</p></div><button onClick={nextPassage} disabled={busy} className="padhaku-new"><RotateCcw className="size-4" />{t.newPassage}</button></div>
@@ -597,18 +620,24 @@ export default function OpenReader({ passages }: Props) {
           <div className="padhaku-title-row"><div><p>{t.newPassage}</p><h2>{passage.title}</h2></div><button onClick={listen} disabled={busy} className={samplePlaying ? "speaking" : ""}><span><Volume2 className="size-4" /></span>{samplePlaying ? t.stopListen : t.listen}</button></div>
           <div className="padhaku-passage">{passage.lines.map((line) => <p key={line}>{line}</p>)}</div>
           <div className="padhaku-meta"><span>{passage.word_count_whitespace} {language === "hi" ? "शब्द" : "words"}</span><span>{language === "hi" ? "लगभग 1 मिनट" : "about 1 minute"}</span><span>हिंदी</span></div>
-          <section className={`padhaku-record ${busy ? "active" : ""}`} aria-live="polite">
+          <section className={`padhaku-record ${busy ? "active" : ""}`} aria-live="polite" aria-busy={status === "transcribing"}>
             <div className="padhaku-record-copy"><strong>{statusTitle}</strong><span>{statusHelp}</span></div>
             <div className="padhaku-record-actions"><span><Timer className="size-4" />{elapsed}</span>{recording ? <button onClick={finishRecording} className="recording"><Mic className="size-4" />{t.finish}</button> : <button onClick={startRecording} disabled={status === "transcribing"}><Play className="size-4 fill-current" />{t.start}</button>}</div>
             {recording && <div className="padhaku-wave">{Array.from({ length: 18 }).map((_, item) => <i key={item} className="audio-bar" style={{ height: `${20 + ((item * 23) % 65)}%` }} />)}</div>}
             {recording && <p className="padhaku-error" translate="no">{transcript || browserHint}</p>}
-            {recordingUrl && !recording && <div className="col-span-full"><p>{language === "hi" ? "अपनी रिकॉर्डिंग सुनें" : "Listen to your recording"}</p><audio controls src={recordingUrl} className="w-full" /></div>}
-            {error && <p className="padhaku-error"><Info className="size-4" />{error}</p>}
+            {status === "transcribing" && <div className="transcription-loader col-span-full" role="status" aria-live="polite">
+              <span className="transcription-spinner" aria-hidden="true" />
+              <div><strong>{language === "hi" ? "आपकी आवाज़ जाँची जा रही है" : "Analyzing your recording"}</strong><p>{language === "hi" ? "कृपया यह पेज खुला रखें। इसमें कुछ सेकंड लग सकते हैं।" : "Please keep this page open. This may take a few seconds."}</p></div>
+              <time>{transcriptionSeconds}s</time>
+              <i aria-hidden="true"><b /></i>
+            </div>}
+            {recordingUrl && !recording && status !== "transcribing" && <div className="col-span-full"><p>{language === "hi" ? "अपनी रिकॉर्डिंग सुनें" : "Listen to your recording"}</p><audio controls src={recordingUrl} className="w-full" /></div>}
+            {error && <p className="padhaku-error" role="alert"><Info className="size-4" />{error}</p>}
           </section>
         </article>
         <aside className="padhaku-side">
-          <section className="padhaku-leader"><div className="padhaku-side-title"><div><p>{language === "hi" ? "इस हफ्ते" : "THIS WEEK"}</p><h2>{language === "hi" ? "लीडरबोर्ड" : "Leaderboard"}</h2></div><Info className="size-5" /></div><div className="padhaku-ranks">{topLeaders.length ? topLeaders.map((row, i) => <p key={`${i}-${row.reader_label}`}><span>{i + 1}</span><strong>{row.reader_label}</strong><b>{row.best_score}</b></p>) : <div className="padhaku-ranks-empty">{language === "hi" ? "अभी कोई सत्यापित स्कोर नहीं है।" : "No verified scores yet."}</div>}</div><button onClick={() => setActiveView("leaderboard")}>{language === "hi" ? "पूरी सूची देखें →" : "View full leaderboard →"}</button></section>
-          <section className="padhaku-streak"><p>{language === "hi" ? "राजकमल रीडिंग रिवार्ड्स" : "RAJKAMAL READING REWARDS"}</p><div><h2>{language === "hi" ? "अपनी रीडिंग स्ट्रीक बनाएँ" : "Build your reading streak"}</h2><span>🔥</span></div><i><b /></i><p>{language === "hi" ? "हर दिन एक नया पाठ पढ़ें और अपनी प्रगति देखें।" : "Read a new passage every day and follow your progress."}</p><button onClick={() => setActiveView("progress")}>{language === "hi" ? "अपनी प्रगति देखें →" : "View your progress →"}</button></section>
+          <section className="padhaku-leader"><div className="padhaku-side-title"><div><p>{language === "hi" ? "इस हफ्ते" : "THIS WEEK"}</p><h2>{language === "hi" ? "लीडरबोर्ड" : "Leaderboard"}</h2></div><Info className="size-5" aria-hidden="true" /></div><div className="padhaku-ranks">{topLeaders.length ? topLeaders.map((row, i) => <p key={`${i}-${row.reader_label}`}><span>{i + 1}</span><strong>{row.reader_label}</strong><b>{row.best_score}</b></p>) : <div className="padhaku-ranks-empty">{language === "hi" ? "अभी कोई सत्यापित स्कोर नहीं है।" : "No verified scores yet."}</div>}</div><button disabled={busy} onClick={() => setActiveView("leaderboard")}>{language === "hi" ? "पूरी सूची देखें →" : "View full leaderboard →"}</button></section>
+          <section className="padhaku-streak"><p>{language === "hi" ? "राजकमल रीडिंग रिवार्ड्स" : "RAJKAMAL READING REWARDS"}</p><div><h2>{language === "hi" ? "अपनी रीडिंग स्ट्रीक बनाएँ" : "Build your reading streak"}</h2><span aria-hidden="true">🔥</span></div><i><b /></i><p>{language === "hi" ? "हर दिन एक नया पाठ पढ़ें और अपनी प्रगति देखें।" : "Read a new passage every day and follow your progress."}</p><button disabled={busy} onClick={() => setActiveView("progress")}>{language === "hi" ? "अपनी प्रगति देखें →" : "View your progress →"}</button></section>
           <ScoreGuide hindi={language === "hi"} />
         </aside>
       </div>
@@ -623,7 +652,7 @@ export default function OpenReader({ passages }: Props) {
             <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-4 sm:px-7">
               <p className="text-sm text-stone-600">{t.profileHelp}</p>
               <p className="mt-3 rounded-xl bg-white/80 px-4 py-3 text-sm leading-6 text-stone-700">{transcript}</p>
-              {error && <p className="mt-3 rounded-xl bg-red-50 px-4 py-3 text-sm text-[#b42332]"><Info className="mr-1 inline size-4" />{error}</p>}
+              {error && <p className="mt-3 rounded-xl bg-red-50 px-4 py-3 text-sm text-[#b42332]" role="alert"><Info className="mr-1 inline size-4" />{error}</p>}
               <div className="mt-5 grid gap-4 sm:grid-cols-2">
                 <FormField label={t.name} error={errors.name}><input autoFocus value={details.name} onChange={(event) => setDetails({ ...details, name: event.target.value })} autoComplete="name" className={field} /></FormField>
                 <FormField label={t.age} error={errors.age}><input value={details.age} onChange={(event) => setDetails({ ...details, age: event.target.value })} type="number" min="5" max="120" className={field} /></FormField>
@@ -643,7 +672,7 @@ export default function OpenReader({ passages }: Props) {
       </div>}
       {status === "result" && <section className="mt-5 rounded-xl border border-[#e5b043]/70 bg-[#fffaf0] p-5  sm:p-7"><div className="flex flex-col justify-between gap-5 sm:flex-row sm:items-start"><div><p className="flex items-center gap-2 text-xs font-bold tracking-[.16em] text-[#b42332]">{t.result}</p><h2 className="serif mt-2 text-3xl font-bold">{t.great}</h2></div><div className="rounded-2xl bg-[#b42332] px-6 py-4 text-center text-white"><p className="text-xs font-bold uppercase tracking-widest text-white/70">{t.score}</p><p className="serif text-4xl font-bold">{score.total}<span className="text-lg text-white/70">/100</span></p></div></div><div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4"><Metric label={t.accuracy} value={`${score.accuracy}%`} /><Metric label={t.fluency} value={`${score.fluency}%`} /><Metric label={t.completion} value={`${score.completion}%`} /><Metric label={t.speed} value={`${score.wordsPerMinute} WPM`} /></div><div className="mt-6 flex flex-col gap-3 border-t border-[#eadabb] pt-5 sm:flex-row"><button onClick={resetAttempt} className="flex flex-1 items-center justify-center gap-2 rounded-full border border-[#b42332] px-4 py-3 text-sm font-bold text-[#b42332]"><RotateCcw className="size-4" />{t.retry}</button><button onClick={downloadScoreCard} className="flex flex-1 items-center justify-center rounded-full border border-[#b42332] px-4 py-3 text-sm font-bold text-[#b42332]">{language === "hi" ? "स्कोर कार्ड डाउनलोड" : "Download score card"}</button><button onClick={share} className="flex flex-1 items-center justify-center gap-2 rounded-full bg-[#b42332] px-4 py-3 text-sm font-bold text-white"><Share2 className="size-4" />{t.share}</button></div></section>}
     </section> : <ReaderDashboard view={activeView} hindi={language === "hi"} refresh={status} onPractice={() => setActiveView("practice")} />}
-    {status !== "details" && <nav className="mobile-reader-nav" aria-label={language === "hi" ? "मोबाइल नेविगेशन" : "Mobile navigation"}>{(["practice", "leaderboard", "progress"] as View[]).map((view) => <button key={view} className={activeView === view ? "active" : ""} onClick={() => setActiveView(view)}>{view === "practice" ? (language === "hi" ? "पाठ" : "Read") : view === "leaderboard" ? (language === "hi" ? "सूची" : "Leaders") : (language === "hi" ? "प्रगति" : "Progress")}</button>)}</nav>}
+    {status !== "details" && <nav className="mobile-reader-nav" aria-label={language === "hi" ? "मोबाइल नेविगेशन" : "Mobile navigation"}>{(["practice", "leaderboard", "progress"] as View[]).map((view) => <button key={view} disabled={busy} aria-current={activeView === view ? "page" : undefined} className={activeView === view ? "active" : ""} onClick={() => setActiveView(view)}>{view === "practice" ? (language === "hi" ? "पाठ" : "Read") : view === "leaderboard" ? (language === "hi" ? "सूची" : "Leaders") : (language === "hi" ? "प्रगति" : "Progress")}</button>)}</nav>}
   </main>;
 }
 
