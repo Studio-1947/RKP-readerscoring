@@ -1,9 +1,7 @@
 const SPEECHMATICS_BASE_URL = "https://asr.api.speechmatics.com/v2";
-const OPENAI_TRANSCRIPTIONS_URL = "https://api.openai.com/v1/audio/transcriptions";
 const MAX_AUDIO_BYTES = 5 * 1024 * 1024;
 const POLL_INTERVAL_MS = 400;
-const SPEECHMATICS_TIMEOUT_MS = 12_000;
-const OPENAI_TIMEOUT_MS = 20_000;
+const SPEECHMATICS_TIMEOUT_MS = 30_000;
 const ACCEPTED_AUDIO_TYPES = new Set(["audio/webm", "audio/mp4", "audio/ogg", "audio/wav", "audio/x-wav"]);
 const EXTENSION_MAP: Record<string, string> = {
   "audio/webm": "webm", "audio/mp4": "mp4", "audio/ogg": "ogg", "audio/wav": "wav", "audio/x-wav": "wav",
@@ -18,7 +16,6 @@ type JobResponse = {
   id?: string;
   job?: { id?: string; status?: string; errors?: Array<{ message?: string }> };
 };
-type OpenAIResponse = { text?: string; detail?: string; error?: { message?: string } };
 type AudioInput = { blob: Blob; bytes: number; filename: string; mimeType: string };
 
 const wait = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -92,30 +89,9 @@ async function transcribeWithSpeechmatics(input: AudioInput, apiKey: string) {
   }
 }
 
-async function transcribeWithOpenAI(input: AudioInput, apiKey: string) {
-  const body = new FormData();
-  body.append("file", input.blob, input.filename);
-  body.append("model", process.env.OPENAI_TRANSCRIPTION_MODEL?.trim() || "gpt-4o-mini-transcribe");
-  body.append("language", "hi");
-  body.append("response_format", "json");
-  const response = await fetch(OPENAI_TRANSCRIPTIONS_URL, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${apiKey}` },
-    body,
-    cache: "no-store",
-    signal: AbortSignal.timeout(OPENAI_TIMEOUT_MS),
-  });
-  const payload = await readJsonResponse<OpenAIResponse>(response);
-  if (!response.ok) throw new Error(payload.error?.message || payload.detail || `OpenAI returned ${response.status}.`);
-  const text = payload.text?.trim();
-  if (!text) throw new Error("No speech was recognized.");
-  return text;
-}
-
 export async function POST(request: Request) {
   const speechmaticsKey = process.env.SPEECHMATICS_API_KEY?.trim();
-  const openAIKey = process.env.OPENAI_API_KEY?.trim();
-  if (!speechmaticsKey && !openAIKey) {
+  if (!speechmaticsKey) {
     return Response.json({ error: "Transcription service is not configured." }, { status: 503 });
   }
 
@@ -154,41 +130,27 @@ export async function POST(request: Request) {
     mimeType,
   };
   const requestId = crypto.randomUUID();
-  const failures: string[] = [];
-
-  if (speechmaticsKey) {
-    try {
-      const text = await transcribeWithSpeechmatics(input, speechmaticsKey);
-      return Response.json({ text, source: "speechmatics" });
-    } catch (caught) {
-      const message = caught instanceof Error ? caught.message : String(caught);
-      failures.push(`Speechmatics: ${message}`);
-      console.error("[Rajkamal Reader][speechmatics] failed; trying OpenAI fallback", {
-        requestId, bytes: input.bytes, mimeType: input.mimeType, error: message,
-      });
-    }
+  try {
+    const text = await transcribeWithSpeechmatics(input, speechmaticsKey);
+    return Response.json({ text, source: "speechmatics" });
+  } catch (caught) {
+    const message = caught instanceof Error ? caught.message : String(caught);
+    const noSpeech = message === "No speech was recognized.";
+    const timedOut = message.includes("timed out") || (caught instanceof DOMException && caught.name === "TimeoutError");
+    console.error("[Rajkamal Reader][speechmatics] transcription failed", {
+      requestId, bytes: input.bytes, mimeType: input.mimeType, error: message,
+    });
+    return Response.json(
+      {
+        error: noSpeech
+          ? "No speech was detected in the recording."
+          : timedOut
+            ? "Speechmatics transcription timed out. Please try a shorter recording."
+            : "Speechmatics could not process this recording.",
+        code: noSpeech ? "NO_SPEECH" : timedOut ? "SPEECHMATICS_TIMEOUT" : "SPEECHMATICS_FAILED",
+        requestId,
+      },
+      { status: noSpeech ? 422 : timedOut ? 504 : 502 },
+    );
   }
-
-  if (openAIKey) {
-    try {
-      const text = await transcribeWithOpenAI(input, openAIKey);
-      return Response.json({ text, source: "openai", fallback: Boolean(speechmaticsKey) });
-    } catch (caught) {
-      const message = caught instanceof Error ? caught.message : String(caught);
-      failures.push(`OpenAI: ${message}`);
-      console.error("[Rajkamal Reader][openai] transcription failed", {
-        requestId, bytes: input.bytes, mimeType: input.mimeType, error: message,
-      });
-    }
-  }
-
-  const noSpeech = failures.length > 0 && failures.every((failure) => failure.endsWith("No speech was recognized."));
-  return Response.json(
-    {
-      error: noSpeech ? "No speech was detected in the recording." : "All configured transcription services failed.",
-      code: noSpeech ? "NO_SPEECH" : "ALL_PROVIDERS_FAILED",
-      requestId,
-    },
-    { status: noSpeech ? 422 : 502 },
-  );
 }
