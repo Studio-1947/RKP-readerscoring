@@ -1,58 +1,121 @@
 const SPEECHMATICS_BASE_URL = "https://asr.api.speechmatics.com/v2";
+const OPENAI_TRANSCRIPTIONS_URL = "https://api.openai.com/v1/audio/transcriptions";
 const MAX_AUDIO_BYTES = 5 * 1024 * 1024;
 const POLL_INTERVAL_MS = 400;
-const JOB_TIMEOUT_MS = 12_000;
-const ACCEPTED_AUDIO_TYPES = new Set([
-  "audio/webm",
-  "audio/mp4",
-  "audio/ogg",
-  "audio/wav",
-  "audio/x-wav",
-]);
-
+const SPEECHMATICS_TIMEOUT_MS = 12_000;
+const OPENAI_TIMEOUT_MS = 20_000;
+const ACCEPTED_AUDIO_TYPES = new Set(["audio/webm", "audio/mp4", "audio/ogg", "audio/wav", "audio/x-wav"]);
 const EXTENSION_MAP: Record<string, string> = {
-  "audio/webm": "webm",
-  "audio/mp4": "mp4",
-  "audio/ogg": "ogg",
-  "audio/wav": "wav",
-  "audio/x-wav": "wav",
+  "audio/webm": "webm", "audio/mp4": "mp4", "audio/ogg": "ogg", "audio/wav": "wav", "audio/x-wav": "wav",
 };
 
 export const runtime = "nodejs";
-export const maxDuration = 15;
+export const maxDuration = 40;
 
 type JobResponse = {
-  code?: number;
   detail?: string;
   error?: string;
   id?: string;
   job?: { id?: string; status?: string; errors?: Array<{ message?: string }> };
 };
+type OpenAIResponse = { text?: string; detail?: string; error?: { message?: string } };
+type AudioInput = { blob: Blob; bytes: number; filename: string; mimeType: string };
 
 const wait = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
-// Speechmatics answers auth failures with an nginx HTML page, so `.json()` would throw
-// and mask the real upstream status behind a parse error.
-async function readJobResponse(response: Response): Promise<JobResponse> {
+// Providers can answer failures with HTML, so parsing must not hide the useful
+// upstream response behind a JSON parse error.
+async function readJsonResponse<T>(response: Response): Promise<T> {
   const raw = await response.text();
-  if (!raw) return {};
+  if (!raw) return {} as T;
   try {
-    return JSON.parse(raw) as JobResponse;
+    return JSON.parse(raw) as T;
   } catch {
-    return { detail: raw.slice(0, 300) };
+    return { detail: raw.slice(0, 300) } as T;
   }
 }
 
-function providerError(payload: JobResponse, fallback: string) {
+function speechmaticsError(payload: JobResponse, fallback: string) {
   return payload.job?.errors?.map((error) => error.message).filter(Boolean).join("; ")
-    || payload.detail
-    || payload.error
-    || fallback;
+    || payload.detail || payload.error || fallback;
+}
+
+async function transcribeWithSpeechmatics(input: AudioInput, apiKey: string) {
+  const headers = { Authorization: `Bearer ${apiKey}` };
+  const signal = AbortSignal.timeout(SPEECHMATICS_TIMEOUT_MS);
+  let jobId = "";
+  try {
+    const body = new FormData();
+    body.append("data_file", input.blob, input.filename);
+    body.append("config", JSON.stringify({
+      type: "transcription",
+      transcription_config: { language: "hi", operating_point: "standard" },
+    }));
+    const submitted = await fetch(`${SPEECHMATICS_BASE_URL}/jobs/`, {
+      method: "POST", headers, body, cache: "no-store", signal,
+    });
+    const submittedPayload = await readJsonResponse<JobResponse>(submitted);
+    if (!submitted.ok) throw new Error(speechmaticsError(submittedPayload, `Speechmatics returned ${submitted.status}.`));
+    jobId = submittedPayload.id || submittedPayload.job?.id || "";
+    if (!jobId) throw new Error("Speechmatics did not return a job ID.");
+
+    const deadline = Date.now() + SPEECHMATICS_TIMEOUT_MS;
+    let completed = false;
+    while (Date.now() < deadline) {
+      await wait(POLL_INTERVAL_MS);
+      const statusResponse = await fetch(`${SPEECHMATICS_BASE_URL}/jobs/${encodeURIComponent(jobId)}`, {
+        headers, cache: "no-store", signal,
+      });
+      const statusPayload = await readJsonResponse<JobResponse>(statusResponse);
+      if (!statusResponse.ok) throw new Error(speechmaticsError(statusPayload, `Speechmatics status returned ${statusResponse.status}.`));
+      if (statusPayload.job?.status === "rejected") {
+        throw new Error(speechmaticsError(statusPayload, "Speechmatics rejected the recording."));
+      }
+      if (statusPayload.job?.status === "done") { completed = true; break; }
+    }
+    if (!completed) throw new Error("Speechmatics transcription timed out.");
+
+    const transcriptResponse = await fetch(
+      `${SPEECHMATICS_BASE_URL}/jobs/${encodeURIComponent(jobId)}/transcript?format=txt`,
+      { headers: { ...headers, Accept: "text/plain" }, cache: "no-store", signal },
+    );
+    if (!transcriptResponse.ok) throw new Error(`Speechmatics transcript returned ${transcriptResponse.status}.`);
+    const text = (await transcriptResponse.text()).trim();
+    if (!text) throw new Error("No speech was recognized.");
+    return text;
+  } finally {
+    if (jobId) {
+      await fetch(`${SPEECHMATICS_BASE_URL}/jobs/${encodeURIComponent(jobId)}`, {
+        method: "DELETE", headers, signal: AbortSignal.timeout(3_000),
+      }).catch(() => undefined);
+    }
+  }
+}
+
+async function transcribeWithOpenAI(input: AudioInput, apiKey: string) {
+  const body = new FormData();
+  body.append("file", input.blob, input.filename);
+  body.append("model", process.env.OPENAI_TRANSCRIPTION_MODEL?.trim() || "gpt-4o-mini-transcribe");
+  body.append("language", "hi");
+  body.append("response_format", "json");
+  const response = await fetch(OPENAI_TRANSCRIPTIONS_URL, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${apiKey}` },
+    body,
+    cache: "no-store",
+    signal: AbortSignal.timeout(OPENAI_TIMEOUT_MS),
+  });
+  const payload = await readJsonResponse<OpenAIResponse>(response);
+  if (!response.ok) throw new Error(payload.error?.message || payload.detail || `OpenAI returned ${response.status}.`);
+  const text = payload.text?.trim();
+  if (!text) throw new Error("No speech was recognized.");
+  return text;
 }
 
 export async function POST(request: Request) {
-  const apiKey = process.env.SPEECHMATICS_API_KEY?.trim();
-  if (!apiKey) {
+  const speechmaticsKey = process.env.SPEECHMATICS_API_KEY?.trim();
+  const openAIKey = process.env.OPENAI_API_KEY?.trim();
+  if (!speechmaticsKey && !openAIKey) {
     return Response.json({ error: "Transcription service is not configured." }, { status: 503 });
   }
 
@@ -79,103 +142,53 @@ export async function POST(request: Request) {
     return Response.json({ error: "Unsupported audio format." }, { status: 415 });
   }
 
-  const headers = { Authorization: `Bearer ${apiKey}` };
-  let jobId = "";
+  // Materialize once so the same recording can safely be sent to either provider.
+  const audioBytes = new Uint8Array(await audio.arrayBuffer());
+  const mimeType = normalizedType || "audio/webm";
+  const extension = EXTENSION_MAP[mimeType] || "webm";
+  const filename = audio.name && audio.name !== "blob" && audio.name.includes(".") ? audio.name : `reading.${extension}`;
+  const input: AudioInput = {
+    blob: new Blob([audioBytes], { type: mimeType }),
+    bytes: audioBytes.byteLength,
+    filename,
+    mimeType,
+  };
   const requestId = crypto.randomUUID();
-  const signal = AbortSignal.timeout(JOB_TIMEOUT_MS);
-  let stage = "submit";
-  let upstreamStatus = 0;
+  const failures: string[] = [];
 
-  try {
-    // Forward a fully materialized copy of the audio. Re-appending the `File` that
-    // `request.formData()` returns leaves the outbound multipart part empty on some
-    // serverless runtimes, and an empty `data_file` is exactly what Speechmatics
-    // rejects with a 400 ("data_file is too small for valid audio, size: 0").
-    const audioBytes = new Uint8Array(await audio.arrayBuffer());
-    if (!audioBytes.byteLength) throw new Error("Recording body was empty after parsing.");
-    const providerFile = new Blob([audioBytes], { type: normalizedType || "audio/webm" });
-
-    const ext = EXTENSION_MAP[normalizedType] || "webm";
-    const filename = (audio.name && audio.name !== "blob" && audio.name.includes("."))
-      ? audio.name
-      : `reading.${ext}`;
-
-    const providerBody = new FormData();
-    providerBody.append("data_file", providerFile, filename);
-    providerBody.append("config", JSON.stringify({
-      type: "transcription",
-      transcription_config: {
-        language: "hi",
-        operating_point: "standard",
-      },
-    }));
-
-    const submitted = await fetch(`${SPEECHMATICS_BASE_URL}/jobs/`, {
-      method: "POST",
-      headers,
-      body: providerBody,
-      cache: "no-store",
-      signal,
-    });
-    upstreamStatus = submitted.status;
-    const submittedPayload = await readJobResponse(submitted);
-    if (!submitted.ok) throw new Error(providerError(submittedPayload, "Speechmatics rejected the recording."));
-    jobId = submittedPayload.id || submittedPayload.job?.id || "";
-    if (!jobId) throw new Error("Speechmatics did not return a job ID.");
-
-    const deadline = Date.now() + JOB_TIMEOUT_MS;
-    let completed = false;
-    stage = "poll";
-    while (Date.now() < deadline) {
-      await wait(POLL_INTERVAL_MS);
-      const statusResponse = await fetch(`${SPEECHMATICS_BASE_URL}/jobs/${encodeURIComponent(jobId)}`, {
-        headers,
-        cache: "no-store",
-        signal,
+  if (speechmaticsKey) {
+    try {
+      const text = await transcribeWithSpeechmatics(input, speechmaticsKey);
+      return Response.json({ text, source: "speechmatics" });
+    } catch (caught) {
+      const message = caught instanceof Error ? caught.message : String(caught);
+      failures.push(`Speechmatics: ${message}`);
+      console.error("[Rajkamal Reader][speechmatics] failed; trying OpenAI fallback", {
+        requestId, bytes: input.bytes, mimeType: input.mimeType, error: message,
       });
-      upstreamStatus = statusResponse.status;
-      const statusPayload = await readJobResponse(statusResponse);
-      if (!statusResponse.ok) throw new Error(providerError(statusPayload, "Unable to read transcription status."));
-      const status = statusPayload.job?.status;
-      if (status === "rejected") throw new Error(providerError(statusPayload, "Speechmatics could not transcribe the recording."));
-      if (status === "done") { completed = true; break; }
-    }
-
-    if (!completed) throw new Error("Transcription timed out.");
-
-    stage = "transcript";
-    const transcriptResponse = await fetch(
-      `${SPEECHMATICS_BASE_URL}/jobs/${encodeURIComponent(jobId)}/transcript?format=txt`,
-      { headers: { ...headers, Accept: "text/plain" }, cache: "no-store", signal },
-    );
-    upstreamStatus = transcriptResponse.status;
-    if (!transcriptResponse.ok) throw new Error("Unable to retrieve the completed transcript.");
-    const text = (await transcriptResponse.text()).trim();
-    if (!text) throw new Error("No speech was recognized.");
-
-    return Response.json({ text, source: "speechmatics" });
-  } catch (caught) {
-    console.error("[Rajkamal Reader][speechmatics] transcription failed", { requestId, stage, upstreamStatus, bytes: audio.size, mimeType: audio.type, error: caught });
-    const message = caught instanceof Error ? caught.message : String(caught);
-    const noSpeech = message === "No speech was recognized.";
-    const timedOut = signal.aborted || message === "Transcription timed out.";
-    return Response.json(
-      {
-        error: noSpeech ? "No speech was detected in the recording." : timedOut ? "Transcription timed out. Please try a shorter recording." : "Transcription service could not process this recording.",
-        code: noSpeech ? "NO_SPEECH" : timedOut ? "PROVIDER_TIMEOUT" : `PROVIDER_${stage.toUpperCase()}_${upstreamStatus || "NETWORK"}`,
-        detail: noSpeech || timedOut ? undefined : message,
-        requestId,
-      },
-      { status: noSpeech ? 422 : timedOut ? 504 : 502 },
-    );
-  } finally {
-    if (jobId) {
-      await fetch(`${SPEECHMATICS_BASE_URL}/jobs/${encodeURIComponent(jobId)}`, {
-        method: "DELETE",
-        headers,
-        signal: AbortSignal.timeout(3_000),
-      }).catch(() => undefined);
     }
   }
-}
 
+  if (openAIKey) {
+    try {
+      const text = await transcribeWithOpenAI(input, openAIKey);
+      return Response.json({ text, source: "openai", fallback: Boolean(speechmaticsKey) });
+    } catch (caught) {
+      const message = caught instanceof Error ? caught.message : String(caught);
+      failures.push(`OpenAI: ${message}`);
+      console.error("[Rajkamal Reader][openai] transcription failed", {
+        requestId, bytes: input.bytes, mimeType: input.mimeType, error: message,
+      });
+    }
+  }
+
+  const noSpeech = failures.length > 0 && failures.every((failure) => failure.endsWith("No speech was recognized."));
+  return Response.json(
+    {
+      error: noSpeech ? "No speech was detected in the recording." : "All configured transcription services failed.",
+      code: noSpeech ? "NO_SPEECH" : "ALL_PROVIDERS_FAILED",
+      requestId,
+    },
+    { status: noSpeech ? 422 : 502 },
+  );
+}
