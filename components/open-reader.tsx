@@ -666,31 +666,73 @@ export default function OpenReader({ passages }: Props) {
   }
 
   function downloadScoreCard() {
+    const size = 1080;
     const canvas = document.createElement("canvas");
-    canvas.width = 1200;
-    canvas.height = 630;
+    canvas.width = size;
+    canvas.height = size;
     const context = canvas.getContext("2d");
     if (!context) return;
-    context.fillStyle = "#9f1420";
-    context.fillRect(0, 0, canvas.width, canvas.height);
-    context.fillStyle = "#c91e2b";
-    context.beginPath();
-    context.arc(1080, 80, 250, 0, Math.PI * 2);
-    context.fill();
+    const centerX = size / 2;
+
+    const background = context.createLinearGradient(0, 0, size, size);
+    background.addColorStop(0, "#7e1421");
+    background.addColorStop(1, "#b42332");
+    context.fillStyle = background;
+    context.fillRect(0, 0, size, size);
+    context.fillStyle = "rgba(255,255,255,.06)";
+    context.beginPath(); context.arc(size * 0.86, size * 0.12, size * 0.32, 0, Math.PI * 2); context.fill();
+    context.beginPath(); context.arc(size * 0.08, size * 0.94, size * 0.22, 0, Math.PI * 2); context.fill();
+
+    context.textAlign = "center";
     context.fillStyle = "#e5b043";
-    context.fillRect(70, 70, 86, 12);
-    context.fillStyle = "#ffffff";
-    context.font = "700 34px Arial";
-    context.fillText(language === "hi" ? "राजकमल हिंदी रीडिंग स्कोर" : "Rajkamal Hindi Reading Score", 70, 140);
-    context.font = "700 54px Arial";
-    context.fillText(passage.title.slice(0, 30), 70, 235);
-    context.font = "900 175px Arial";
-    context.fillText(String(score.total), 70, 475);
-    context.font = "700 34px Arial";
-    context.fillText("/100", 285, 465);
+    context.fillRect(centerX - 45, 92, 90, 8);
+
     context.fillStyle = "#ffe8a7";
+    context.font = "800 42px Arial";
+    context.fillText(language === "hi" ? "पढ़ाकू क्लब" : "PADHAKU CLUB", centerX, 170);
+
+    const readerName = (savedReader?.name || details.name || (language === "hi" ? "पाठक" : "Reader")).trim();
+    context.fillStyle = "#ffffff";
+    context.font = "900 68px Arial";
+    context.fillText(readerName.length > 20 ? `${readerName.slice(0, 20)}…` : readerName, centerX, 275);
+
+    context.fillStyle = "rgba(255,255,255,.85)";
+    context.font = "600 32px Arial";
+    context.fillText(passage.title.length > 28 ? `${passage.title.slice(0, 28)}…` : passage.title, centerX, 335);
+
+    context.fillStyle = "rgba(255,255,255,.7)";
+    context.font = "700 28px Arial";
+    context.fillText(language === "hi" ? "कुल स्कोर" : "TOTAL SCORE", centerX, 430);
+
+    context.fillStyle = "#ffffff";
+    context.font = "900 170px Arial";
+    context.fillText(`${score.total}/100`, centerX, 630);
+
+    const metrics = [
+      { label: language === "hi" ? "शुद्धता" : "ACCURACY", value: `${score.accuracy}%` },
+      { label: language === "hi" ? "प्रवाह" : "FLUENCY", value: `${score.fluency}%` },
+      { label: language === "hi" ? "गति" : "SPEED", value: `${score.wordsPerMinute} WPM` },
+    ];
+    const columnWidth = size / 3;
+    context.strokeStyle = "rgba(255,255,255,.25)";
+    context.lineWidth = 2;
+    [columnWidth, columnWidth * 2].forEach((x) => {
+      context.beginPath(); context.moveTo(x, 750); context.lineTo(x, 840); context.stroke();
+    });
+    metrics.forEach((metric, index) => {
+      const x = columnWidth * index + columnWidth / 2;
+      context.fillStyle = "#ffffff";
+      context.font = "900 46px Arial";
+      context.fillText(metric.value, x, 800);
+      context.fillStyle = "rgba(255,255,255,.65)";
+      context.font = "700 22px Arial";
+      context.fillText(metric.label, x, 830);
+    });
+
+    context.fillStyle = "rgba(255,255,255,.7)";
     context.font = "700 26px Arial";
-    context.fillText(`${score.accuracy}% accuracy · ${score.wordsPerMinute} WPM`, 70, 555);
+    context.fillText(language === "hi" ? "राजकमल प्रकाशन" : "RAJKAMAL PRAKASHAN", centerX, size - 60);
+
     canvas.toBlob((blob) => {
       if (!blob) return;
       const url = URL.createObjectURL(blob);

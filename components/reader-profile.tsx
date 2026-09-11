@@ -93,6 +93,7 @@ export function ReaderProfile({ hindi, refresh }: { hindi: boolean; refresh: str
       <Insight icon={<Trophy />} label={hindi ? "कुल मिलाकर" : "Overall"} value={`${overall}/100`} />
     </div>
     <div className="dashboard-card">
+      <p className="profile-name-label">{hindi ? "नाम" : "NAME"}</p>
       <div className="card-heading"><h2>{details.name}</h2></div>
       <dl className="profile-details">
         <div><dt>{hindi ? "आयु" : "Age"}</dt><dd>{details.age}</dd></div>
