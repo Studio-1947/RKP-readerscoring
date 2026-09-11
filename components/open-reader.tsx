@@ -403,7 +403,14 @@ export default function OpenReader({ passages }: Props) {
     if (recognitionRestart.current) clearTimeout(recognitionRestart.current);
     try { browserRecognition.current?.stop(); }
     catch (caught) { micLog("browser recognition stop failed", { error: String(caught) }); }
-    recorder.stop();
+    // Explicitly flush the current MediaRecorder segment before stopping. Some
+    // mobile browsers otherwise produce a non-empty WebM/MP4 blob whose final
+    // container metadata/audio cluster is incomplete and rejected by the ASR.
+    try { recorder.requestData(); }
+    catch (caught) { micLog("final audio flush failed", { error: String(caught) }); }
+    window.setTimeout(() => {
+      if (recorder.state !== "inactive") recorder.stop();
+    }, 150);
   }
 
   function listen() {

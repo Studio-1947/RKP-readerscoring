@@ -2,6 +2,7 @@ const SPEECHMATICS_BASE_URL = "https://asr.api.speechmatics.com/v2";
 const MAX_AUDIO_BYTES = 5 * 1024 * 1024;
 const POLL_INTERVAL_MS = 400;
 const SPEECHMATICS_TIMEOUT_MS = 30_000;
+const TRANSIENT_RETRY_DELAYS_MS = [400, 1_000];
 const ACCEPTED_AUDIO_TYPES = new Set(["audio/webm", "audio/mp4", "audio/ogg", "audio/wav", "audio/x-wav"]);
 const EXTENSION_MAP: Record<string, string> = {
   "audio/webm": "webm", "audio/mp4": "mp4", "audio/ogg": "ogg", "audio/wav": "wav", "audio/x-wav": "wav",
@@ -37,22 +38,34 @@ function speechmaticsError(payload: JobResponse, fallback: string) {
     || payload.detail || payload.error || fallback;
 }
 
+function isTransientStatus(status: number) {
+  return status === 408 || status === 429 || status >= 500;
+}
+
 async function transcribeWithSpeechmatics(input: AudioInput, apiKey: string) {
   const headers = { Authorization: `Bearer ${apiKey}` };
   const signal = AbortSignal.timeout(SPEECHMATICS_TIMEOUT_MS);
   let jobId = "";
   try {
-    const body = new FormData();
-    body.append("data_file", input.blob, input.filename);
-    body.append("config", JSON.stringify({
-      type: "transcription",
-      transcription_config: { language: "hi", operating_point: "standard" },
-    }));
-    const submitted = await fetch(`${SPEECHMATICS_BASE_URL}/jobs/`, {
-      method: "POST", headers, body, cache: "no-store", signal,
-    });
-    const submittedPayload = await readJsonResponse<JobResponse>(submitted);
-    if (!submitted.ok) throw new Error(speechmaticsError(submittedPayload, `Speechmatics returned ${submitted.status}.`));
+    let submitted: Response | undefined;
+    let submittedPayload: JobResponse = {};
+    for (let attempt = 0; attempt <= TRANSIENT_RETRY_DELAYS_MS.length; attempt += 1) {
+      const body = new FormData();
+      body.append("data_file", input.blob, input.filename);
+      body.append("config", JSON.stringify({
+        type: "transcription",
+        transcription_config: { language: "hi", operating_point: "standard" },
+      }));
+      submitted = await fetch(`${SPEECHMATICS_BASE_URL}/jobs/`, {
+        method: "POST", headers, body, cache: "no-store", signal,
+      });
+      submittedPayload = await readJsonResponse<JobResponse>(submitted);
+      if (submitted.ok || !isTransientStatus(submitted.status) || attempt === TRANSIENT_RETRY_DELAYS_MS.length) break;
+      await wait(TRANSIENT_RETRY_DELAYS_MS[attempt]);
+    }
+    if (!submitted?.ok) {
+      throw new Error(speechmaticsError(submittedPayload, `Speechmatics returned ${submitted?.status || "no response"}.`));
+    }
     jobId = submittedPayload.id || submittedPayload.job?.id || "";
     if (!jobId) throw new Error("Speechmatics did not return a job ID.");
 
@@ -64,7 +77,10 @@ async function transcribeWithSpeechmatics(input: AudioInput, apiKey: string) {
         headers, cache: "no-store", signal,
       });
       const statusPayload = await readJsonResponse<JobResponse>(statusResponse);
-      if (!statusResponse.ok) throw new Error(speechmaticsError(statusPayload, `Speechmatics status returned ${statusResponse.status}.`));
+      if (!statusResponse.ok) {
+        if (isTransientStatus(statusResponse.status)) continue;
+        throw new Error(speechmaticsError(statusPayload, `Speechmatics status returned ${statusResponse.status}.`));
+      }
       if (statusPayload.job?.status === "rejected") {
         throw new Error(speechmaticsError(statusPayload, "Speechmatics rejected the recording."));
       }
@@ -113,6 +129,9 @@ export async function POST(request: Request) {
   const normalizedType = audio.type.split(";")[0].toLowerCase();
   if (!audio.size || audio.size > MAX_AUDIO_BYTES) {
     return Response.json({ error: "Recording must be between 1 byte and 5 MB." }, { status: 413 });
+  }
+  if (audio.size < 1_000) {
+    return Response.json({ error: "Recording is too short or incomplete. Please record for at least two seconds.", code: "INCOMPLETE_RECORDING" }, { status: 422 });
   }
   if (normalizedType && !ACCEPTED_AUDIO_TYPES.has(normalizedType)) {
     return Response.json({ error: "Unsupported audio format." }, { status: 415 });
