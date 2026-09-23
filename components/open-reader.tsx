@@ -5,8 +5,9 @@ import { ScoreGuide } from "@/components/reading-context";
 import { ReaderDashboard } from "@/components/reader-dashboard";
 import { QuizTab } from "@/components/quiz-tab";
 import { ReaderProfile } from "@/components/reader-profile";
+import { AuthControls } from "@/components/auth-controls";
 import { downloadScoreCard as downloadScoreCardImage } from "@/lib/score-card";
-import { Info, Languages, Mic, Play, RotateCcw, Share2, Timer, Volume2, X } from "lucide-react";
+import { Info, Languages, Mic, Moon, Play, RotateCcw, Share2, Sun, Timer, Volume2, X } from "lucide-react";
 import { ReadingScore, scoreReading } from "@/lib/scoring";
 import { loadSavedReaderDetails, saveReaderAttempt } from "@/lib/reader-storage";
 import { createClient } from "@/utils/supabase/client";
@@ -177,6 +178,7 @@ function speechChunks(lines: string[], maxLength = 150) {
 
 export default function OpenReader({ passages }: Props) {
   const [language, setLanguage] = useState<Language>("hi");
+  const [darkMode, setDarkMode] = useState(false);
   const [activeView, setActiveView] = useState<View>("practice");
   const [index, setIndex] = useState(0);
   const [status, setStatus] = useState<Status>("ready");
@@ -226,6 +228,25 @@ export default function OpenReader({ passages }: Props) {
   const busy = recording || status === "transcribing";
   const elapsed = `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
 
+  async function refreshSavedReader() {
+    const saved = await loadSavedReaderDetails().catch(() => null);
+    if (!saved) { savedReaderRef.current = null; setSavedReader(null); return; }
+    const restored: Details = { ...saved, consent: true, leaderboardOptIn: saved.leaderboardOptIn === true };
+    savedReaderRef.current = restored; setSavedReader(restored); setDetails(restored);
+  }
+
+  useEffect(() => {
+    const stored = window.localStorage.getItem("rkp-theme");
+    const dark = stored === "dark" || (!stored && window.matchMedia("(prefers-color-scheme: dark)").matches);
+    document.documentElement.classList.toggle("dark", dark);
+    const frame = window.requestAnimationFrame(() => setDarkMode(dark));
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
+
+  function toggleTheme() {
+    const next = !darkMode; setDarkMode(next); window.localStorage.setItem("rkp-theme", next ? "dark" : "light"); document.documentElement.classList.toggle("dark", next);
+  }
+
   useEffect(() => {
     if (!recording) return;
     const timer = window.setInterval(() => setSeconds(Math.floor((Date.now() - startedAt.current) / 1000)), 500);
@@ -257,12 +278,8 @@ export default function OpenReader({ passages }: Props) {
     let cancelled = false;
     async function restoreReader() {
       try {
-        const saved = await loadSavedReaderDetails();
-        if (cancelled || !saved) return;
-        const restored: Details = { ...saved, consent: true, leaderboardOptIn: saved.leaderboardOptIn === true };
-        savedReaderRef.current = restored;
-        setSavedReader(restored);
-        setDetails(restored);
+        await refreshSavedReader();
+        if (cancelled) return;
       } catch {
         // A missing/expired anonymous session simply behaves like a new reader.
       }
@@ -715,7 +732,7 @@ export default function OpenReader({ passages }: Props) {
     <header className="reader-topbar"><div className="reader-topbar-inner">
       <div className="flex min-w-0 items-center gap-2.5 sm:gap-3 lg:gap-4"><p className="reader-chant whitespace-nowrap text-sm font-bold text-[#7e1421] sm:text-lg lg:text-2xl">पढ़ाकू</p></div>
       <nav className="desktop-reader-nav" aria-label={language === "hi" ? "मुख्य नेविगेशन" : "Main navigation"}>{(["practice", "quiz", "leaderboard", "progress", "profile"] as View[]).map((view) => <button key={view} disabled={busy} aria-current={activeView === view ? "page" : undefined} className={activeView === view ? "active" : ""} onClick={() => setActiveView(view)}>{view === "practice" ? (language === "hi" ? "आज का पाठ" : "Today’s reading") : view === "quiz" ? (language === "hi" ? "क्विज़" : "Quiz") : view === "leaderboard" ? (language === "hi" ? "लीडरबोर्ड" : "Leaderboard") : view === "progress" ? (language === "hi" ? "मेरी प्रगति" : "My progress") : (language === "hi" ? "प्रोफ़ाइल" : "Profile")}</button>)}</nav>
-      <button disabled={busy} onClick={() => setLanguage(language === "hi" ? "en" : "hi")} className="flex shrink-0 items-center gap-1.5 rounded-xl border border-stone-300 bg-white px-3 py-2 text-xs font-bold text-[#7e1421] sm:gap-2 sm:px-4 sm:text-sm lg:px-5 lg:text-base disabled:cursor-wait disabled:opacity-50"><Languages className="size-3.5 sm:size-4 lg:size-4.5" />{language === "hi" ? "English" : "हिंदी"}</button>
+      <div className="flex shrink-0 items-center gap-2"><button type="button" disabled={busy} onClick={toggleTheme} className="reader-icon-button" aria-label={darkMode ? "Use light theme" : "Use dark theme"}>{darkMode ? <Sun className="size-4" /> : <Moon className="size-4" />}</button><button disabled={busy} onClick={() => setLanguage(language === "hi" ? "en" : "hi")} className="flex items-center gap-1.5 rounded-xl border border-stone-300 bg-white px-3 py-2 text-xs font-bold text-[#7e1421] sm:gap-2 sm:px-4 sm:text-sm lg:px-5 lg:text-base disabled:cursor-wait disabled:opacity-50"><Languages className="size-3.5 sm:size-4 lg:size-4.5" />{language === "hi" ? "English" : "हिंदी"}</button><AuthControls hindi={language === "hi"} onAuthenticated={refreshSavedReader} onProfile={() => setActiveView("profile")} /></div>
     </div></header>
     {activeView === "practice" ? <section className="padhaku-practice">
       <div className="padhaku-intro"><div><p className="padhaku-eyebrow">{language === "hi" ? "हिंदी रीडिंग स्कोर" : "HINDI READING SCORE"}</p><h1>{language === "hi" ? "पढ़िए, रिकॉर्ड कीजिए, स्कोर बढ़ाइए।" : "Read, record, improve your score."}</h1><p>{language === "hi" ? "आज का छोटा हिंदी पाठ अपनी आवाज़ में पढ़ें।" : "Read today’s short Hindi passage in your own voice."}</p></div><button onClick={nextPassage} disabled={busy} className="padhaku-new"><RotateCcw className="size-4" />{t.newPassage}</button></div>

@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Award, BookOpen, Download, LogOut, Medal, Trophy } from "lucide-react";
+import { Award, BookOpen, Download, LogOut, Medal, Pencil, Trophy } from "lucide-react";
 import { createClient } from "@/utils/supabase/client";
-import { deleteReaderData, loadSavedReaderDetails, updateLeaderboardOptIn, type ReaderDetails } from "@/lib/reader-storage";
+import { deleteReaderData, loadSavedReaderDetails, saveReaderProfile, updateLeaderboardOptIn, type ReaderDetails } from "@/lib/reader-storage";
 import { downloadScoreCard } from "@/lib/score-card";
 import { Insight, ViewHeading } from "@/components/reader-dashboard";
 
@@ -23,6 +23,7 @@ export function ReaderProfile({ hindi, refresh }: { hindi: boolean; refresh: str
   const [loading, setLoading] = useState(true);
   const [savingOptIn, setSavingOptIn] = useState(false);
   const [generation, setGeneration] = useState(0);
+  const [editing, setEditing] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -106,10 +107,7 @@ export function ReaderProfile({ hindi, refresh }: { hindi: boolean; refresh: str
 
   if (loading) return <section className="dashboard-empty" role="status"><span className="dashboard-spinner" aria-hidden="true" />{hindi ? "प्रोफ़ाइल लोड हो रही है…" : "Loading your profile…"}</section>;
 
-  if (!details) return <section className="dashboard-view">
-    <ViewHeading eyebrow={hindi ? "आपकी पहचान" : "YOUR IDENTITY"} title={hindi ? "प्रोफ़ाइल" : "Profile"} subtitle={hindi ? "पहला पाठ या क्विज़ पूरा करने के बाद आपकी प्रोफ़ाइल यहाँ दिखेगी।" : "Your profile appears here after your first reading or quiz."} />
-    <div className="dashboard-card"><p>{hindi ? "अभी कोई प्रोफ़ाइल सेव नहीं है।" : "No profile saved yet."}</p></div>
-  </section>;
+  if (!details || editing) return <ProfileEditor hindi={hindi} initial={details} onSaved={(saved) => { setDetails(saved); setEditing(false); setGeneration((value) => value + 1); }} />;
 
   const bestPassageScore = readingHistory.reduce((max, row) => Math.max(max, row.total_score), 0);
   const bestQuizScore = quizHistory.reduce((max, row) => Math.max(max, row.total_score), 0);
@@ -126,7 +124,7 @@ export function ReaderProfile({ hindi, refresh }: { hindi: boolean; refresh: str
     </div>
     <div className="dashboard-card">
       <p className="profile-name-label">{hindi ? "नाम" : "NAME"}</p>
-      <div className="card-heading"><h2 className="profile-name">{details.name}</h2></div>
+      <div className="card-heading"><h2 className="profile-name">{details.name || (hindi ? "पाठक" : "Reader")}</h2><button onClick={() => setEditing(true)}><Pencil className="size-4" />{hindi ? "विवरण जोड़ें / बदलें" : "Add or edit details"}</button></div>
       <dl className="profile-details">
         <div><dt>{hindi ? "आयु" : "Age"}</dt><dd>{details.age}</dd></div>
         <div><dt>{hindi ? "फ़ोन" : "Phone"}</dt><dd>{maskPhone(details.phone)}</dd></div>
@@ -135,6 +133,7 @@ export function ReaderProfile({ hindi, refresh }: { hindi: boolean; refresh: str
         <div><dt>{hindi ? "पठन अभ्यास" : "Reading attempts"}</dt><dd>{readingHistory.length}</dd></div>
         <div><dt>{hindi ? "क्विज़ खेले" : "Quizzes played"}</dt><dd>{quizHistory.length}</dd></div>
       </dl>
+      <div className="profile-favorites"><div><h3>{hindi ? "पसंदीदा लेखक" : "Favourite authors"}</h3><p>{details.favoriteAuthors?.length ? details.favoriteAuthors.join(" · ") : (hindi ? "अभी नहीं जोड़ा गया" : "Not added yet")}</p></div><div><h3>{hindi ? "पसंदीदा किताबें" : "Favourite books"}</h3><p>{details.favoriteBooks?.length ? details.favoriteBooks.join(" · ") : (hindi ? "अभी नहीं जोड़ा गया" : "Not added yet")}</p></div></div>
       <label className="profile-toggle"><input type="checkbox" checked={details.leaderboardOptIn ?? false} disabled={savingOptIn} onChange={toggleOptIn} /><span>{hindi ? "मेरा स्कोर लीडरबोर्ड पर दिखाएँ" : "Show my score on the leaderboard"}</span></label>
       <button type="button" onClick={forgetMe} className="profile-forget"><LogOut className="size-4" />{hindi ? "मेरा डेटा हटाएँ" : "Delete my data"}</button>
     </div>
@@ -163,4 +162,20 @@ export function ReaderProfile({ hindi, refresh }: { hindi: boolean; refresh: str
 
     <p className="profile-note"><Medal className="mr-1 inline size-3.5" />{hindi ? "यह जानकारी केवल इस डिवाइस के सत्र से जुड़ी है और नया पाठ या क्विज़ पूरा करने पर अपने-आप बनती है।" : "This is tied to this device's session and is created automatically when you complete a reading or quiz."}</p>
   </section>;
+}
+
+function ProfileEditor({ hindi, initial, onSaved }: { hindi: boolean; initial: ReaderDetails | null; onSaved: (details: ReaderDetails) => void }) {
+  const [details, setDetails] = useState<ReaderDetails>(initial ?? { name: "", age: "", phone: "", email: "", place: "", leaderboardOptIn: true, favoriteAuthors: [], favoriteBooks: [] });
+  const [authors, setAuthors] = useState((initial?.favoriteAuthors ?? []).join(", "));
+  const [books, setBooks] = useState((initial?.favoriteBooks ?? []).join(", "));
+  const [error, setError] = useState(""); const [saving, setSaving] = useState(false);
+  const field = "mt-1.5 w-full rounded-xl border border-stone-300 bg-white px-3 py-3 outline-none focus:border-[#b42332] focus:ring-2 focus:ring-[#b42332]/15";
+  async function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault(); const list = (value: string) => value.split(",").map((item) => item.trim()).filter(Boolean);
+    const favoriteAuthors = list(authors); const favoriteBooks = list(books);
+    if ((details.age && (!Number.isInteger(Number(details.age)) || Number(details.age) < 5 || Number(details.age) > 120)) || (details.phone && details.phone.replace(/\D/g, "").length < 10) || favoriteAuthors.length > 4 || favoriteBooks.length > 4) { setError(hindi ? "आयु 5 से 120 के बीच रखें, फोन नंबर मान्य रखें, और अधिकतम 4 लेखक व 4 किताबें जोड़ें।" : "Use a valid age/phone number and add at most four authors and four books."); return; }
+    const saved = { ...details, favoriteAuthors, favoriteBooks }; setSaving(true); setError("");
+    try { await saveReaderProfile(saved); onSaved(saved); } catch (caught) { setError(caught instanceof Error ? caught.message : "Unable to save your profile."); } finally { setSaving(false); }
+  }
+  return <section className="dashboard-view"><ViewHeading eyebrow={hindi ? "आपकी पहचान" : "YOUR IDENTITY"} title={hindi ? "प्रोफ़ाइल विवरण" : "Profile details"} subtitle={hindi ? "जो जानकारी चाहें जोड़ें या बदलें—पसंदीदा लेखक और किताबें सहित।" : "Add or update any details, including favourite authors and books."} /><form onSubmit={submit} className="dashboard-card profile-editor"><div className="grid gap-4 sm:grid-cols-2"><label>Full name<input value={details.name} onChange={(e) => setDetails({ ...details, name: e.target.value })} className={field} /></label><label>{hindi ? "आयु" : "Age"}<input type="number" min="5" max="120" value={details.age} onChange={(e) => setDetails({ ...details, age: e.target.value })} className={field} /></label><label>{hindi ? "फ़ोन" : "Phone"}<input inputMode="tel" value={details.phone} onChange={(e) => setDetails({ ...details, phone: e.target.value })} className={field} /></label><label>Email<input type="email" value={details.email} onChange={(e) => setDetails({ ...details, email: e.target.value })} className={field} /></label><label className="sm:col-span-2">{hindi ? "शहर / स्थान" : "City / place"}<input value={details.place} onChange={(e) => setDetails({ ...details, place: e.target.value })} className={field} /></label><label className="sm:col-span-2">{hindi ? "पसंदीदा लेखक (अधिकतम 4, कॉमा से अलग करें)" : "Favourite authors (up to 4, comma separated)"}<input value={authors} onChange={(e) => setAuthors(e.target.value)} className={field} placeholder="Premchand, Mahadevi Verma" /></label><label className="sm:col-span-2">{hindi ? "पसंदीदा किताबें (अधिकतम 4, कॉमा से अलग करें)" : "Favourite books (up to 4, comma separated)"}<input value={books} onChange={(e) => setBooks(e.target.value)} className={field} placeholder="Godaan, Madhushala" /></label></div>{error && <p className="mt-4 text-sm text-[#b42332]" role="alert">{error}</p>}<button disabled={saving} className="mt-5 rounded-full bg-[#b42332] px-5 py-3 font-bold text-white">{saving ? "Saving…" : (hindi ? "प्रोफ़ाइल सहेजें" : "Save profile")}</button></form></section>;
 }

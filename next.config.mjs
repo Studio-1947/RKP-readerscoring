@@ -1,4 +1,6 @@
 /** @type {import('next').NextConfig} */
+const developmentEval = process.env.NODE_ENV === "development" ? " 'unsafe-eval'" : "";
+
 const nextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
@@ -6,7 +8,7 @@ const nextConfig = {
     return [{
       source: "/:path*",
       headers: [
-        { key: "Content-Security-Policy", value: "default-src 'self'; base-uri 'self'; connect-src 'self' https://*.supabase.co; font-src 'self'; frame-ancestors 'none'; img-src 'self' data: blob:; media-src 'self' blob:; object-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline';" },
+        { key: "Content-Security-Policy", value: `default-src 'self'; base-uri 'self'; connect-src 'self' https://*.supabase.co; font-src 'self'; frame-ancestors 'none'; img-src 'self' data: blob:; media-src 'self' blob:; object-src 'none'; script-src 'self' 'unsafe-inline'${developmentEval}; style-src 'self' 'unsafe-inline';` },
         { key: "Permissions-Policy", value: "camera=(), geolocation=(), microphone=(self), payment=(), usb=()" },
         { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
         { key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains; preload" },

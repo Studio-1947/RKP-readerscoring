@@ -8,6 +8,8 @@ export type ReaderDetails = {
   email: string;
   place: string;
   leaderboardOptIn?: boolean;
+  favoriteAuthors?: string[];
+  favoriteBooks?: string[];
 };
 
 export async function loadSavedReaderDetails(): Promise<ReaderDetails | null> {
@@ -18,19 +20,21 @@ export async function loadSavedReaderDetails(): Promise<ReaderDetails | null> {
 
   const { data, error } = await supabase
     .from("reader_profiles")
-    .select("full_name,age,phone,email,place,leaderboard_opt_in")
+    .select("full_name,age,phone,email,place,leaderboard_opt_in,favorite_authors,favorite_books")
     .eq("id", auth.user.id)
     .maybeSingle();
   if (error) throw error;
   if (!data) return null;
 
   return {
-    name: data.full_name,
-    age: String(data.age),
-    phone: data.phone,
+    name: data.full_name ?? "",
+    age: data.age == null ? "" : String(data.age),
+    phone: data.phone ?? "",
     email: data.email ?? "",
-    place: data.place,
+    place: data.place ?? "",
     leaderboardOptIn: data.leaderboard_opt_in === true,
+    favoriteAuthors: data.favorite_authors ?? [],
+    favoriteBooks: data.favorite_books ?? [],
   };
 }
 
@@ -67,8 +71,8 @@ export async function getAnonymousReaderId(details: ReaderDetails) {
     if (profileError) throw profileError;
 
     const sameReader = existingProfile
-      && existingProfile.full_name.trim().toLocaleLowerCase() === details.name.trim().toLocaleLowerCase()
-      && existingProfile.phone.replace(/\D/g, "") === details.phone.replace(/\D/g, "");
+      && (existingProfile.full_name ?? "").trim().toLocaleLowerCase() === details.name.trim().toLocaleLowerCase()
+      && (existingProfile.phone ?? "").replace(/\D/g, "") === details.phone.replace(/\D/g, "");
     if (!existingProfile || sameReader) return { supabase, userId: currentUser.user.id };
 
     // Shared devices are common at events. Do not overwrite the previous person's
@@ -111,4 +115,9 @@ export async function saveQuizAttempt(input: SaveQuizAttemptInput) {
 
 export async function deleteReaderData() {
   await authenticatedRequest("/api/reader", null, "DELETE");
+}
+
+export async function saveReaderProfile(details: ReaderDetails) {
+  await getAnonymousReaderId(details);
+  return authenticatedRequest("/api/profile", details);
 }

@@ -7,6 +7,6 @@ export function createClient() {
   if (!url || !key) throw new Error("Supabase public environment variables are missing.");
 
   return createBrowserClient(url, key, {
-    auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false },
+    auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
   });
 }
