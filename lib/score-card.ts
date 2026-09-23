@@ -2,6 +2,7 @@ export type ScoreCardMetric = { label: string; value: string };
 
 export function downloadScoreCard(input: {
   readerName: string;
+  username?: string;
   kicker: string;
   title?: string;
   totalScore: number;
@@ -9,7 +10,7 @@ export function downloadScoreCard(input: {
   hindi: boolean;
   filename?: string;
 }) {
-  const { readerName, kicker, title, totalScore, metrics, hindi, filename = "rajkamal-score-card.png" } = input;
+  const { readerName, username, kicker, title, totalScore, metrics, hindi, filename = "rajkamal-score-card.png" } = input;
   const size = 1080;
   const canvas = document.createElement("canvas");
   canvas.width = size;
@@ -33,16 +34,23 @@ export function downloadScoreCard(input: {
 
   context.fillStyle = "#ffe8a7";
   context.font = "800 42px Arial";
-  context.fillText(hindi ? "पढ़ाकू क्लब" : "PADHAKU CLUB", centerX, 170);
+  context.fillText(hindi ? "पढ़ाकू क्लब" : "PADHAKU CLUB", centerX, 160);
 
   context.fillStyle = "#ffffff";
-  context.font = "900 68px Arial";
+  context.font = "900 62px Arial";
   const name = (readerName || (hindi ? "पाठक" : "Reader")).trim();
-  context.fillText(name.length > 20 ? `${name.slice(0, 20)}…` : name, centerX, 275);
+  context.fillText(name.length > 20 ? `${name.slice(0, 20)}…` : name, centerX, username ? 238 : 265);
+
+  if (username) {
+    context.fillStyle = "#ffe8a7";
+    context.font = "700 28px Arial";
+    const tag = username.startsWith("@") ? username : `@${username}`;
+    context.fillText(tag.length > 24 ? `${tag.slice(0, 24)}…` : tag, centerX, 278);
+  }
 
   context.fillStyle = "rgba(255,255,255,.85)";
   context.font = "600 30px Arial";
-  context.fillText(kicker.length > 32 ? `${kicker.slice(0, 32)}…` : kicker, centerX, 325);
+  context.fillText(kicker.length > 32 ? `${kicker.slice(0, 32)}…` : kicker, centerX, 328);
 
   if (title) {
     context.fillStyle = "rgba(255,255,255,.7)";

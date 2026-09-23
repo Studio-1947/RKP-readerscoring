@@ -3,6 +3,7 @@ import { createClient } from "@/utils/supabase/client";
 
 export type ReaderDetails = {
   name: string;
+  username?: string;
   age: string;
   phone: string;
   email: string;
@@ -10,6 +11,7 @@ export type ReaderDetails = {
   leaderboardOptIn?: boolean;
   favoriteAuthors?: string[];
   favoriteBooks?: string[];
+  memberSince?: string;
 };
 
 export async function loadSavedReaderDetails(): Promise<ReaderDetails | null> {
@@ -20,7 +22,7 @@ export async function loadSavedReaderDetails(): Promise<ReaderDetails | null> {
 
   const { data, error } = await supabase
     .from("reader_profiles")
-    .select("full_name,age,phone,email,place,leaderboard_opt_in,favorite_authors,favorite_books")
+    .select("full_name,username,age,phone,email,place,leaderboard_opt_in,favorite_authors,favorite_books,created_at")
     .eq("id", auth.user.id)
     .maybeSingle();
   if (error) throw error;
@@ -28,6 +30,7 @@ export async function loadSavedReaderDetails(): Promise<ReaderDetails | null> {
 
   return {
     name: data.full_name ?? "",
+    username: data.username ?? "",
     age: data.age == null ? "" : String(data.age),
     phone: data.phone ?? "",
     email: data.email ?? "",
@@ -35,6 +38,7 @@ export async function loadSavedReaderDetails(): Promise<ReaderDetails | null> {
     leaderboardOptIn: data.leaderboard_opt_in === true,
     favoriteAuthors: data.favorite_authors ?? [],
     favoriteBooks: data.favorite_books ?? [],
+    memberSince: data.created_at,
   };
 }
 
