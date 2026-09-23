@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { Award, BookOpen, Download, LogOut, Medal, Trophy } from "lucide-react";
 import { createClient } from "@/utils/supabase/client";
-import { loadSavedReaderDetails, updateLeaderboardOptIn, type ReaderDetails } from "@/lib/reader-storage";
+import { deleteReaderData, loadSavedReaderDetails, updateLeaderboardOptIn, type ReaderDetails } from "@/lib/reader-storage";
 import { downloadScoreCard } from "@/lib/score-card";
 import { Insight, ViewHeading } from "@/components/reader-dashboard";
 
@@ -66,7 +66,9 @@ export function ReaderProfile({ hindi, refresh }: { hindi: boolean; refresh: str
   }
 
   async function forgetMe() {
-    await createClient().auth.signOut({ scope: "local" });
+    if (!window.confirm(hindi ? "क्या आप अपनी प्रोफ़ाइल और सभी स्कोर स्थायी रूप से हटाना चाहते हैं?" : "Permanently delete your profile and all scores?")) return;
+    try { await deleteReaderData(); }
+    finally { await createClient().auth.signOut({ scope: "local" }); }
     setDetails(null);
     setReadingHistory([]);
     setQuizHistory([]);
@@ -134,7 +136,7 @@ export function ReaderProfile({ hindi, refresh }: { hindi: boolean; refresh: str
         <div><dt>{hindi ? "क्विज़ खेले" : "Quizzes played"}</dt><dd>{quizHistory.length}</dd></div>
       </dl>
       <label className="profile-toggle"><input type="checkbox" checked={details.leaderboardOptIn ?? false} disabled={savingOptIn} onChange={toggleOptIn} /><span>{hindi ? "मेरा स्कोर लीडरबोर्ड पर दिखाएँ" : "Show my score on the leaderboard"}</span></label>
-      <button type="button" onClick={forgetMe} className="profile-forget"><LogOut className="size-4" />{hindi ? "इस डिवाइस पर भूल जाएँ" : "Forget me on this device"}</button>
+      <button type="button" onClick={forgetMe} className="profile-forget"><LogOut className="size-4" />{hindi ? "मेरा डेटा हटाएँ" : "Delete my data"}</button>
     </div>
 
     <div className="dashboard-card mt-5">

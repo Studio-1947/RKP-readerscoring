@@ -2,7 +2,7 @@
 
 import { FormEvent, useMemo, useState } from "react";
 import { Check, Info, RotateCcw, X } from "lucide-react";
-import { quizId, quizQuestions, quizTitle } from "@/lib/quiz-data";
+import { quizQuestions } from "@/lib/quiz-data";
 import { loadSavedReaderDetails, saveQuizAttempt, type ReaderDetails } from "@/lib/reader-storage";
 
 type Stage = "answering" | "profile" | "result";
@@ -61,7 +61,7 @@ export function QuizTab({ hindi }: { hindi: boolean }) {
       setDetails(saved);
       setIsSaving(true);
       try {
-        await saveQuizAttempt({ details: saved, quizId, quizTitle: quizTitle.hi, correctCount: correct, totalQuestions: questions.length, totalScore: score });
+        await saveQuizAttempt({ details: saved, answers });
         setSaved(true);
       } catch {
         setSaveError(hindi ? "स्कोर सेव नहीं हो पाया। यह केवल आपकी स्क्रीन पर दिखाया जा रहा है।" : "We could not save this score. It is only shown on your screen.");
@@ -91,7 +91,7 @@ export function QuizTab({ hindi }: { hindi: boolean }) {
     setIsSaving(true);
     const { correct, score } = computeScore(answers);
     try {
-      await saveQuizAttempt({ details, quizId, quizTitle: quizTitle.hi, correctCount: correct, totalQuestions: questions.length, totalScore: score });
+      await saveQuizAttempt({ details, answers });
       setSaved(true);
     } catch {
       setSaveError(hindi ? "स्कोर सेव नहीं हो पाया। यह केवल आपकी स्क्रीन पर दिखाया जा रहा है।" : "We could not save this score. It is only shown on your screen.");

@@ -41,7 +41,17 @@ type SaveAttemptInput = {
   durationSeconds: number;
   score: ReadingScore;
   scoringSource?: "browser" | "server";
+  proof?: string;
 };
+
+async function authenticatedRequest(path: string, body: unknown, method = "POST") {
+  const supabase = createClient();
+  const { data, error } = await supabase.auth.getSession();
+  if (error || !data.session?.access_token) throw error ?? new Error("No reader session found.");
+  const response = await fetch(path, { method, headers: { Authorization: `Bearer ${data.session.access_token}`, "Content-Type": "application/json" }, body: method === "DELETE" ? undefined : JSON.stringify(body) });
+  if (!response.ok) throw new Error((await response.json().catch(() => null))?.error ?? "Unable to save reader data.");
+  return response.status === 204 ? null : response.json();
+}
 
 export async function getAnonymousReaderId(details: ReaderDetails) {
   const supabase = createClient();
@@ -73,36 +83,10 @@ export async function getAnonymousReaderId(details: ReaderDetails) {
 }
 
 export async function saveReaderAttempt(input: SaveAttemptInput) {
-  const { details, passage, transcript, durationSeconds, score, scoringSource = "browser" } = input;
-  const { supabase, userId } = await getAnonymousReaderId(details);
-
-  const { error: profileError } = await supabase.from("reader_profiles").upsert({
-    id: userId,
-    full_name: details.name.trim(),
-    age: Number(details.age),
-    phone: details.phone.trim(),
-    email: details.email.trim() || null,
-    place: details.place.trim(),
-    consented_at: new Date().toISOString(),
-    leaderboard_opt_in: details.leaderboardOptIn === true,
-  });
-  if (profileError) throw profileError;
-
-  const { error: attemptError } = await supabase.from("reading_attempts").insert({
-    reader_id: userId,
-    passage_id: passage.id,
-    passage_title: passage.title,
-    passage_sequence: passage.sequence,
-    transcript,
-    duration_seconds: durationSeconds,
-    accuracy: score.accuracy,
-    fluency: score.fluency,
-    completion: score.completion,
-    words_per_minute: score.wordsPerMinute,
-    total_score: score.total,
-    scoring_source: scoringSource,
-  });
-  if (attemptError) throw attemptError;
+  const { details, passage, durationSeconds, proof } = input;
+  await getAnonymousReaderId(details);
+  if (!proof) throw new Error("Only server-verified recordings can be saved.");
+  return authenticatedRequest("/api/attempts/reading", { details, passageId: passage.id, durationSeconds, proof });
 }
 
 export async function updateLeaderboardOptIn(optIn: boolean) {
@@ -117,36 +101,14 @@ export async function updateLeaderboardOptIn(optIn: boolean) {
 
 type SaveQuizAttemptInput = {
   details: ReaderDetails;
-  quizId: string;
-  quizTitle: string;
-  correctCount: number;
-  totalQuestions: number;
-  totalScore: number;
+  answers: Record<string, number>;
 };
 
 export async function saveQuizAttempt(input: SaveQuizAttemptInput) {
-  const { details, quizId, quizTitle, correctCount, totalQuestions, totalScore } = input;
-  const { supabase, userId } = await getAnonymousReaderId(details);
+  await getAnonymousReaderId(input.details);
+  return authenticatedRequest("/api/attempts/quiz", input);
+}
 
-  const { error: profileError } = await supabase.from("reader_profiles").upsert({
-    id: userId,
-    full_name: details.name.trim(),
-    age: Number(details.age),
-    phone: details.phone.trim(),
-    email: details.email.trim() || null,
-    place: details.place.trim(),
-    consented_at: new Date().toISOString(),
-    leaderboard_opt_in: details.leaderboardOptIn === true,
-  });
-  if (profileError) throw profileError;
-
-  const { error: attemptError } = await supabase.from("quiz_attempts").insert({
-    reader_id: userId,
-    quiz_id: quizId,
-    quiz_title: quizTitle,
-    correct_count: correctCount,
-    total_questions: totalQuestions,
-    total_score: totalScore,
-  });
-  if (attemptError) throw attemptError;
+export async function deleteReaderData() {
+  await authenticatedRequest("/api/reader", null, "DELETE");
 }

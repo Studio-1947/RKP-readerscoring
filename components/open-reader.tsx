@@ -188,6 +188,7 @@ export default function OpenReader({ passages }: Props) {
   const [transcriptionStatus, setTranscriptionStatus] = useState("");
   const [transcriptionSeconds, setTranscriptionSeconds] = useState(0);
   const [transcriptSource, setTranscriptSource] = useState<TranscriptSource>("browser");
+  const [transcriptionProof, setTranscriptionProof] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [browserHint, setBrowserHint] = useState("");
   const [recordingUrl, setRecordingUrl] = useState("");
@@ -435,9 +436,9 @@ export default function OpenReader({ passages }: Props) {
     const extension = blob.type.includes("wav") ? "wav" : blob.type.includes("mp4") ? "mp4" : blob.type.includes("ogg") ? "ogg" : "webm";
     body.append("audio", blob, `reading.${extension}`);
     const response = await fetch("/api/transcribe", { method: "POST", body, signal: AbortSignal.timeout(55_000) });
-    const payload = await response.json().catch(() => ({ error: "Transcription returned an invalid response." })) as { text?: string; error?: string; code?: string; detail?: string; requestId?: string };
-    if (!response.ok || !payload.text) throw new Error(`${payload.error || "Transcription failed."} [${payload.code || response.status}${payload.detail ? ` : ${payload.detail}` : ""}${payload.requestId ? ` / ${payload.requestId}` : ""}]`);
-    return payload.text.trim();
+    const payload = await response.json().catch(() => ({ error: "Transcription returned an invalid response." })) as { text?: string; proof?: string; error?: string; code?: string; detail?: string; requestId?: string };
+    if (!response.ok || !payload.text || !payload.proof) throw new Error(`${payload.error || "Transcription failed."} [${payload.code || response.status}${payload.detail ? ` : ${payload.detail}` : ""}${payload.requestId ? ` / ${payload.requestId}` : ""}]`);
+    return { text: payload.text.trim(), proof: payload.proof };
   }
 
   async function startRecording() {
@@ -533,9 +534,10 @@ export default function OpenReader({ passages }: Props) {
           setRecordingUrl(recordingUrlRef.current);
           micLog("recording ready for Speechmatics transcription", { bytes: blob.size, mimeType: blob.type, duration });
           setTranscriptionStatus(language === "hi" ? "रिकॉर्डिंग का सुरक्षित ट्रांसक्रिप्शन हो रहा है…" : "Securely transcribing your recording…");
-          const text = await transcribeWithSpeechmatics(blob);
+          const { text, proof } = await transcribeWithSpeechmatics(blob);
           if (!text) throw new Error("No speech was recognized");
           setTranscript(text);
+          setTranscriptionProof(proof);
           setTranscriptSource("server");
           const nextScore = scoreReading(passage.reference_text, text, duration, attempts.current);
           setScore(nextScore);
@@ -543,7 +545,7 @@ export default function OpenReader({ passages }: Props) {
           const returningReader = savedReaderRef.current;
           if (returningReader) {
             setIsSaving(true);
-            await saveReaderAttempt({ details: { ...returningReader, leaderboardOptIn: returningReader.leaderboardOptIn && true }, passage, transcript: text, durationSeconds: duration, score: nextScore, scoringSource: "server" });
+            await saveReaderAttempt({ details: { ...returningReader, leaderboardOptIn: returningReader.leaderboardOptIn && true }, passage, transcript: text, durationSeconds: duration, score: nextScore, scoringSource: "server", proof });
             setStatus("result");
             setIsSaving(false);
           } else {
@@ -554,6 +556,7 @@ export default function OpenReader({ passages }: Props) {
           const fallback = browserLatestTranscript.current.trim();
           if (fallback) {
             setTranscript(fallback);
+            setTranscriptionProof("");
             setTranscriptSource("browser");
             const nextScore = scoreReading(passage.reference_text, fallback, duration, attempts.current);
             setScore(nextScore);
@@ -561,7 +564,6 @@ export default function OpenReader({ passages }: Props) {
             const returningReader = savedReaderRef.current;
             if (returningReader) {
               setIsSaving(true);
-              await saveReaderAttempt({ details: { ...returningReader, leaderboardOptIn: false }, passage, transcript: fallback, durationSeconds: duration, score: nextScore, scoringSource: "browser" });
               setStatus("result");
               setIsSaving(false);
             } else {
@@ -673,7 +675,7 @@ export default function OpenReader({ passages }: Props) {
     if (Object.keys(next).length) return;
     setIsSaving(true); setError("");
     try {
-      await saveReaderAttempt({ details: { ...details, leaderboardOptIn: transcriptSource === "server" && details.leaderboardOptIn }, passage, transcript, durationSeconds: seconds, score, scoringSource: transcriptSource });
+      await saveReaderAttempt({ details: { ...details, leaderboardOptIn: transcriptSource === "server" && details.leaderboardOptIn }, passage, transcript, durationSeconds: seconds, score, scoringSource: transcriptSource, proof: transcriptionProof });
       const persisted = { ...details, leaderboardOptIn: transcriptSource === "server" && details.leaderboardOptIn };
       savedReaderRef.current = persisted;
       setSavedReader(persisted);
