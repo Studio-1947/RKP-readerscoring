@@ -1,3 +1,5 @@
+import { allowRateLimit, issueTranscriptionProof } from "@/lib/server/security";
+
 const SPEECHMATICS_BASE_URL = "https://asr.api.speechmatics.com/v2";
 const MAX_AUDIO_BYTES = 5 * 1024 * 1024;
 const POLL_INTERVAL_MS = 400;
@@ -106,8 +108,11 @@ async function transcribeWithSpeechmatics(input: AudioInput, apiKey: string) {
 }
 
 export async function POST(request: Request) {
+  if (!allowRateLimit(request, "transcribe", 8, 60 * 60 * 1_000)) {
+    return Response.json({ error: "Too many transcription requests. Please try again later." }, { status: 429, headers: { "Retry-After": "3600" } });
+  }
   const speechmaticsKey = process.env.SPEECHMATICS_API_KEY?.trim();
-  if (!speechmaticsKey) {
+  if (!speechmaticsKey || !process.env.TRANSCRIPTION_PROOF_SECRET) {
     return Response.json({ error: "Transcription service is not configured." }, { status: 503 });
   }
 
@@ -151,7 +156,7 @@ export async function POST(request: Request) {
   const requestId = crypto.randomUUID();
   try {
     const text = await transcribeWithSpeechmatics(input, speechmaticsKey);
-    return Response.json({ text, source: "speechmatics" });
+    return Response.json({ text, source: "speechmatics", proof: issueTranscriptionProof(text) });
   } catch (caught) {
     const message = caught instanceof Error ? caught.message : String(caught);
     const noSpeech = message === "No speech was recognized.";

@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Award, BookOpen, Download, LogOut, Medal, Trophy } from "lucide-react";
+import { Award, BookOpen, Download, LogOut, Medal, Pencil, Trash2, Trophy } from "lucide-react";
 import { createClient } from "@/utils/supabase/client";
-import { loadSavedReaderDetails, updateLeaderboardOptIn, type ReaderDetails } from "@/lib/reader-storage";
+import { deleteReaderData, loadSavedReaderDetails, saveReaderProfile, updateLeaderboardOptIn, type ReaderDetails } from "@/lib/reader-storage";
 import { downloadScoreCard } from "@/lib/score-card";
 import { Insight, ViewHeading } from "@/components/reader-dashboard";
+import { BrandLogo } from "@/components/brand-logo";
 
 type ReadingRow = { created_at: string; passage_title: string; total_score: number; accuracy: number; fluency: number; words_per_minute: number };
 type QuizRow = { created_at: string; quiz_title: string; total_score: number; correct_count: number; total_questions: number };
@@ -16,13 +17,14 @@ function maskPhone(phone: string) {
   return `${"•".repeat(Math.max(0, digits.length - 4))}${digits.slice(-4)}`;
 }
 
-export function ReaderProfile({ hindi, refresh }: { hindi: boolean; refresh: string }) {
+export function ReaderProfile({ hindi, refresh, onSignedOut }: { hindi: boolean; refresh: string; onSignedOut?: () => void }) {
   const [details, setDetails] = useState<ReaderDetails | null>(null);
   const [readingHistory, setReadingHistory] = useState<ReadingRow[]>([]);
   const [quizHistory, setQuizHistory] = useState<QuizRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [savingOptIn, setSavingOptIn] = useState(false);
   const [generation, setGeneration] = useState(0);
+  const [editing, setEditing] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -65,11 +67,41 @@ export function ReaderProfile({ hindi, refresh }: { hindi: boolean; refresh: str
     }
   }
 
-  async function forgetMe() {
-    await createClient().auth.signOut({ scope: "local" });
+  async function handleSignOut() {
+    // Instantly reset local component states
     setDetails(null);
     setReadingHistory([]);
     setQuizHistory([]);
+
+    const supabase = createClient();
+    const sessionData = await supabase.auth.getSession().catch(() => null);
+    const token = sessionData?.data?.session?.access_token;
+
+    await Promise.all([
+      supabase.auth.signOut({ scope: "local" }).catch(() => null),
+      token ? fetch("/api/auth/logout", { method: "POST", headers: { Authorization: `Bearer ${token}` } }).catch(() => null) : Promise.resolve(),
+    ]);
+
+    if (onSignedOut) void onSignedOut();
+    setGeneration((value) => value + 1);
+  }
+
+  async function forgetMe() {
+    if (!window.confirm(hindi ? "क्या आप अपनी प्रोफ़ाइल और सभी स्कोर स्थायी रूप से हटाना चाहते हैं?" : "Permanently delete your profile and all scores?")) return;
+    try { await deleteReaderData(); }
+    finally {
+      const supabase = createClient();
+      const sessionData = await supabase.auth.getSession().catch(() => null);
+      const token = sessionData?.data?.session?.access_token;
+      await Promise.all([
+        supabase.auth.signOut({ scope: "local" }).catch(() => null),
+        token ? fetch("/api/auth/logout", { method: "POST", headers: { Authorization: `Bearer ${token}` } }).catch(() => null) : Promise.resolve(),
+      ]);
+    }
+    setDetails(null);
+    setReadingHistory([]);
+    setQuizHistory([]);
+    if (onSignedOut) void onSignedOut();
     setGeneration((value) => value + 1);
   }
 
@@ -104,10 +136,7 @@ export function ReaderProfile({ hindi, refresh }: { hindi: boolean; refresh: str
 
   if (loading) return <section className="dashboard-empty" role="status"><span className="dashboard-spinner" aria-hidden="true" />{hindi ? "प्रोफ़ाइल लोड हो रही है…" : "Loading your profile…"}</section>;
 
-  if (!details) return <section className="dashboard-view">
-    <ViewHeading eyebrow={hindi ? "आपकी पहचान" : "YOUR IDENTITY"} title={hindi ? "प्रोफ़ाइल" : "Profile"} subtitle={hindi ? "पहला पाठ या क्विज़ पूरा करने के बाद आपकी प्रोफ़ाइल यहाँ दिखेगी।" : "Your profile appears here after your first reading or quiz."} />
-    <div className="dashboard-card"><p>{hindi ? "अभी कोई प्रोफ़ाइल सेव नहीं है।" : "No profile saved yet."}</p></div>
-  </section>;
+  if (!details || editing) return <ProfileEditor hindi={hindi} initial={details} onSaved={(saved) => { setDetails(saved); setEditing(false); setGeneration((value) => value + 1); }} onCancel={details ? () => setEditing(false) : undefined} />;
 
   const bestPassageScore = readingHistory.reduce((max, row) => Math.max(max, row.total_score), 0);
   const bestQuizScore = quizHistory.reduce((max, row) => Math.max(max, row.total_score), 0);
@@ -122,19 +151,23 @@ export function ReaderProfile({ hindi, refresh }: { hindi: boolean; refresh: str
       <Insight icon={<Award />} label={hindi ? "क्विज़ सर्वश्रेष्ठ" : "Quiz best"} value={`${bestQuizScore}/100`} />
       <Insight icon={<Trophy />} label={hindi ? "कुल मिलाकर" : "Overall"} value={`${overall}/100`} />
     </div>
-    <div className="dashboard-card">
-      <p className="profile-name-label">{hindi ? "नाम" : "NAME"}</p>
-      <div className="card-heading"><h2 className="profile-name">{details.name}</h2></div>
-      <dl className="profile-details">
-        <div><dt>{hindi ? "आयु" : "Age"}</dt><dd>{details.age}</dd></div>
-        <div><dt>{hindi ? "फ़ोन" : "Phone"}</dt><dd>{maskPhone(details.phone)}</dd></div>
-        <div><dt>{hindi ? "शहर / स्थान" : "City / place"}</dt><dd>{details.place}</dd></div>
-        {details.email && <div><dt>{hindi ? "ईमेल" : "Email"}</dt><dd>{details.email}</dd></div>}
-        <div><dt>{hindi ? "पठन अभ्यास" : "Reading attempts"}</dt><dd>{readingHistory.length}</dd></div>
-        <div><dt>{hindi ? "क्विज़ खेले" : "Quizzes played"}</dt><dd>{quizHistory.length}</dd></div>
-      </dl>
+    <section className="reader-club-card">
+      <div className="reader-card-orb reader-card-orb-one" /><div className="reader-card-orb reader-card-orb-two" />
+      <div className="reader-card-top"><span className="flex items-center gap-1.5"><BrandLogo className="h-5 w-auto text-white/90" />RAJKAMAL</span><span>READER CLUB</span></div>
+      <div className="reader-card-chip" aria-hidden="true"><i /><i /><i /></div>
+      <div className="reader-card-number">{details.phone ? `•••• •••• ${details.phone.replace(/\D/g, "").slice(-4)}` : "•••• •••• ••••"}</div>
+      <div className="reader-card-bottom"><div><small>{hindi ? "पाठक" : "READER"}</small><strong>{details.name || (hindi ? "पाठक" : "Reader")}</strong></div><div><small>{hindi ? "सदस्य" : "MEMBER SINCE"}</small><strong>{details.memberSince ? new Date(details.memberSince).toLocaleDateString(hindi ? "hi-IN" : "en-IN", { month: "short", year: "numeric" }) : "—"}</strong></div></div>
+      <p className="reader-card-email">{details.email || (hindi ? "अपनी प्रोफ़ाइल में ईमेल जोड़ें" : "Add your email in Profile")}</p>
+    </section>
+    <div className="dashboard-card profile-details-card">
+      <div className="card-heading"><h2>{hindi ? "प्रोफ़ाइल विवरण" : "Profile details"}</h2><button onClick={() => setEditing(true)}><Pencil className="size-4" />{hindi ? "बदलें" : "Edit"}</button></div>
+      <dl className="profile-details"><div><dt>{hindi ? "आयु" : "Age"}</dt><dd>{details.age || "—"}</dd></div><div><dt>{hindi ? "फ़ोन" : "Phone"}</dt><dd>{details.phone ? maskPhone(details.phone) : "—"}</dd></div><div><dt>{hindi ? "शहर / स्थान" : "City / place"}</dt><dd>{details.place || "—"}</dd></div><div><dt>{hindi ? "पठन अभ्यास" : "Reading attempts"}</dt><dd>{readingHistory.length}</dd></div><div><dt>{hindi ? "क्विज़ खेले" : "Quizzes played"}</dt><dd>{quizHistory.length}</dd></div></dl>
+      <div className="profile-favorites"><div><h3>{hindi ? "पसंदीदा लेखक" : "Favourite authors"}</h3><p>{details.favoriteAuthors?.length ? details.favoriteAuthors.join(" · ") : (hindi ? "अभी नहीं जोड़ा गया" : "Not added yet")}</p></div><div><h3>{hindi ? "पसंदीदा किताबें" : "Favourite books"}</h3><p>{details.favoriteBooks?.length ? details.favoriteBooks.join(" · ") : (hindi ? "अभी नहीं जोड़ा गया" : "Not added yet")}</p></div></div>
       <label className="profile-toggle"><input type="checkbox" checked={details.leaderboardOptIn ?? false} disabled={savingOptIn} onChange={toggleOptIn} /><span>{hindi ? "मेरा स्कोर लीडरबोर्ड पर दिखाएँ" : "Show my score on the leaderboard"}</span></label>
-      <button type="button" onClick={forgetMe} className="profile-forget"><LogOut className="size-4" />{hindi ? "इस डिवाइस पर भूल जाएँ" : "Forget me on this device"}</button>
+      <div className="mt-4 flex flex-wrap items-center gap-3">
+        <button type="button" onClick={handleSignOut} className="profile-signout"><LogOut className="size-4" />{hindi ? "साइन आउट" : "Sign out"}</button>
+        <button type="button" onClick={forgetMe} className="profile-forget"><Trash2 className="size-4" />{hindi ? "मेरा डेटा हटाएँ" : "Delete my data"}</button>
+      </div>
     </div>
 
     <div className="dashboard-card mt-5">
@@ -161,4 +194,21 @@ export function ReaderProfile({ hindi, refresh }: { hindi: boolean; refresh: str
 
     <p className="profile-note"><Medal className="mr-1 inline size-3.5" />{hindi ? "यह जानकारी केवल इस डिवाइस के सत्र से जुड़ी है और नया पाठ या क्विज़ पूरा करने पर अपने-आप बनती है।" : "This is tied to this device's session and is created automatically when you complete a reading or quiz."}</p>
   </section>;
+}
+
+function ProfileEditor({ hindi, initial, onSaved, onCancel }: { hindi: boolean; initial: ReaderDetails | null; onSaved: (details: ReaderDetails) => void; onCancel?: () => void }) {
+  const [details, setDetails] = useState<ReaderDetails>(initial ?? { name: "", username: "", age: "", phone: "", email: "", place: "", leaderboardOptIn: true, favoriteAuthors: [], favoriteBooks: [] });
+  const [authors, setAuthors] = useState((initial?.favoriteAuthors ?? []).join(", "));
+  const [books, setBooks] = useState((initial?.favoriteBooks ?? []).join(", "));
+  const [error, setError] = useState(""); const [saving, setSaving] = useState(false);
+  const field = "mt-1.5 w-full rounded-xl border border-stone-300 bg-white px-3 py-3 text-stone-900 placeholder:text-stone-400 outline-none focus:border-[#b42332] focus:ring-2 focus:ring-[#b42332]/15 dark:border-[#68414a] dark:bg-[#2b1c20] dark:text-white dark:placeholder:text-[#c4b0b6]";
+  async function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault(); const list = (value: string) => value.split(",").map((item) => item.trim()).filter(Boolean);
+    const favoriteAuthors = list(authors); const favoriteBooks = list(books);
+    if (!details.name.trim()) { setError(hindi ? "कृपया अपना पूरा नाम भरें।" : "Please enter your full name."); return; }
+    if ((details.age && (!Number.isInteger(Number(details.age)) || Number(details.age) < 5 || Number(details.age) > 120)) || (details.phone && details.phone.replace(/\D/g, "").length < 10) || favoriteAuthors.length > 4 || favoriteBooks.length > 4) { setError(hindi ? "आयु 5 से 120 के बीच रखें, फोन नंबर मान्य रखें, और अधिकतम 4 लेखक व 4 किताबें जोड़ें।" : "Use a valid age/phone number and add at most four authors and four books."); return; }
+    const saved = { ...details, favoriteAuthors, favoriteBooks }; setSaving(true); setError("");
+    try { await saveReaderProfile(saved); onSaved(saved); } catch (caught) { setError(caught instanceof Error ? caught.message : "Unable to save your profile."); } finally { setSaving(false); }
+  }
+  return <section className="dashboard-view"><ViewHeading eyebrow={hindi ? "आपकी पहचान" : "YOUR IDENTITY"} title={hindi ? "प्रोफ़ाइल विवरण" : "Profile details"} subtitle={hindi ? "जो जानकारी चाहें जोड़ें या बदलें—पसंदीदा लेखक और किताबें सहित।" : "Add or update any details, including favourite authors and books."} /><form onSubmit={submit} className="dashboard-card profile-editor"><div className="grid gap-4 sm:grid-cols-2"><label>{hindi ? "पूरा नाम *" : "Full name *"}<input required value={details.name} onChange={(e) => setDetails({ ...details, name: e.target.value })} className={field} /></label><label>{hindi ? "यूज़रनेम / हैंडल" : "Username / handle"}<input placeholder="@username" value={details.username ?? ""} onChange={(e) => setDetails({ ...details, username: e.target.value })} className={field} /></label><label>{hindi ? "आयु" : "Age"}<input type="number" min="5" max="120" value={details.age} onChange={(e) => setDetails({ ...details, age: e.target.value })} className={field} /></label><label>{hindi ? "फ़ोन" : "Phone"}<input inputMode="tel" value={details.phone} onChange={(e) => setDetails({ ...details, phone: e.target.value })} className={field} /></label><label className="sm:col-span-2">Email<input type="email" value={details.email} onChange={(e) => setDetails({ ...details, email: e.target.value })} className={field} /></label><label className="sm:col-span-2">{hindi ? "शहर / स्थान" : "City / place"}<input value={details.place} onChange={(e) => setDetails({ ...details, place: e.target.value })} className={field} /></label><label className="sm:col-span-2">{hindi ? "पसंदीदा लेखक (अधिकतम 4, कॉमा से अलग करें)" : "Favourite authors (up to 4, comma separated)"}<input value={authors} onChange={(e) => setAuthors(e.target.value)} className={field} placeholder="Premchand, Mahadevi Verma" /></label><label className="sm:col-span-2">{hindi ? "पसंदीदा किताबें (अधिकतम 4, कॉमा से अलग करें)" : "Favourite books (up to 4, comma separated)"}<input value={books} onChange={(e) => setBooks(e.target.value)} className={field} placeholder="Godaan, Madhushala" /></label></div>{error && <p className="mt-4 text-sm text-[#b42332]" role="alert">{error}</p>}<div className="mt-5 flex flex-wrap items-center gap-3"><button disabled={saving} className="rounded-full bg-[#b42332] px-6 py-3 font-bold text-white hover:bg-[#7e1421] disabled:opacity-60">{saving ? "Saving…" : (hindi ? "प्रोफ़ाइल सहेजें" : "Save profile")}</button>{onCancel && <button type="button" onClick={onCancel} disabled={saving} className="rounded-full border border-stone-300 bg-white px-6 py-3 font-bold text-stone-700 hover:bg-stone-50 dark:border-[#56353c] dark:bg-[#24191c] dark:text-[#f4e9e8] dark:hover:bg-[#332126]">{hindi ? "रद्द करें" : "Cancel"}</button>}</div></form></section>;
 }
