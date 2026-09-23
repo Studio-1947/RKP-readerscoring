@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Award, BookOpen, Download, LogOut, Medal, Pencil, Trophy } from "lucide-react";
+import { Award, BookOpen, Download, LogOut, Medal, Pencil, Trash2, Trophy } from "lucide-react";
 import { createClient } from "@/utils/supabase/client";
 import { deleteReaderData, loadSavedReaderDetails, saveReaderProfile, updateLeaderboardOptIn, type ReaderDetails } from "@/lib/reader-storage";
 import { downloadScoreCard } from "@/lib/score-card";
 import { Insight, ViewHeading } from "@/components/reader-dashboard";
+import { BrandLogo } from "@/components/brand-logo";
 
 type ReadingRow = { created_at: string; passage_title: string; total_score: number; accuracy: number; fluency: number; words_per_minute: number };
 type QuizRow = { created_at: string; quiz_title: string; total_score: number; correct_count: number; total_questions: number };
@@ -16,7 +17,7 @@ function maskPhone(phone: string) {
   return `${"•".repeat(Math.max(0, digits.length - 4))}${digits.slice(-4)}`;
 }
 
-export function ReaderProfile({ hindi, refresh }: { hindi: boolean; refresh: string }) {
+export function ReaderProfile({ hindi, refresh, onSignedOut }: { hindi: boolean; refresh: string; onSignedOut?: () => void }) {
   const [details, setDetails] = useState<ReaderDetails | null>(null);
   const [readingHistory, setReadingHistory] = useState<ReadingRow[]>([]);
   const [quizHistory, setQuizHistory] = useState<QuizRow[]>([]);
@@ -66,13 +67,41 @@ export function ReaderProfile({ hindi, refresh }: { hindi: boolean; refresh: str
     }
   }
 
-  async function forgetMe() {
-    if (!window.confirm(hindi ? "क्या आप अपनी प्रोफ़ाइल और सभी स्कोर स्थायी रूप से हटाना चाहते हैं?" : "Permanently delete your profile and all scores?")) return;
-    try { await deleteReaderData(); }
-    finally { await createClient().auth.signOut({ scope: "local" }); }
+  async function handleSignOut() {
+    // Instantly reset local component states
     setDetails(null);
     setReadingHistory([]);
     setQuizHistory([]);
+
+    const supabase = createClient();
+    const sessionData = await supabase.auth.getSession().catch(() => null);
+    const token = sessionData?.data?.session?.access_token;
+
+    await Promise.all([
+      supabase.auth.signOut({ scope: "local" }).catch(() => null),
+      token ? fetch("/api/auth/logout", { method: "POST", headers: { Authorization: `Bearer ${token}` } }).catch(() => null) : Promise.resolve(),
+    ]);
+
+    if (onSignedOut) void onSignedOut();
+    setGeneration((value) => value + 1);
+  }
+
+  async function forgetMe() {
+    if (!window.confirm(hindi ? "क्या आप अपनी प्रोफ़ाइल और सभी स्कोर स्थायी रूप से हटाना चाहते हैं?" : "Permanently delete your profile and all scores?")) return;
+    try { await deleteReaderData(); }
+    finally {
+      const supabase = createClient();
+      const sessionData = await supabase.auth.getSession().catch(() => null);
+      const token = sessionData?.data?.session?.access_token;
+      await Promise.all([
+        supabase.auth.signOut({ scope: "local" }).catch(() => null),
+        token ? fetch("/api/auth/logout", { method: "POST", headers: { Authorization: `Bearer ${token}` } }).catch(() => null) : Promise.resolve(),
+      ]);
+    }
+    setDetails(null);
+    setReadingHistory([]);
+    setQuizHistory([]);
+    if (onSignedOut) void onSignedOut();
     setGeneration((value) => value + 1);
   }
 
@@ -124,7 +153,7 @@ export function ReaderProfile({ hindi, refresh }: { hindi: boolean; refresh: str
     </div>
     <section className="reader-club-card">
       <div className="reader-card-orb reader-card-orb-one" /><div className="reader-card-orb reader-card-orb-two" />
-      <div className="reader-card-top"><span>RAJKAMAL</span><span>READER CLUB</span></div>
+      <div className="reader-card-top"><span className="flex items-center gap-1.5"><BrandLogo className="h-5 w-auto text-white/90" />RAJKAMAL</span><span>READER CLUB</span></div>
       <div className="reader-card-chip" aria-hidden="true"><i /><i /><i /></div>
       <div className="reader-card-number">{details.phone ? `•••• •••• ${details.phone.replace(/\D/g, "").slice(-4)}` : "•••• •••• ••••"}</div>
       <div className="reader-card-bottom"><div><small>{hindi ? "पाठक" : "READER"}</small><strong>{details.name || (hindi ? "पाठक" : "Reader")}</strong></div><div><small>{hindi ? "सदस्य" : "MEMBER SINCE"}</small><strong>{details.memberSince ? new Date(details.memberSince).toLocaleDateString(hindi ? "hi-IN" : "en-IN", { month: "short", year: "numeric" }) : "—"}</strong></div></div>
@@ -135,7 +164,10 @@ export function ReaderProfile({ hindi, refresh }: { hindi: boolean; refresh: str
       <dl className="profile-details"><div><dt>{hindi ? "आयु" : "Age"}</dt><dd>{details.age || "—"}</dd></div><div><dt>{hindi ? "फ़ोन" : "Phone"}</dt><dd>{details.phone ? maskPhone(details.phone) : "—"}</dd></div><div><dt>{hindi ? "शहर / स्थान" : "City / place"}</dt><dd>{details.place || "—"}</dd></div><div><dt>{hindi ? "पठन अभ्यास" : "Reading attempts"}</dt><dd>{readingHistory.length}</dd></div><div><dt>{hindi ? "क्विज़ खेले" : "Quizzes played"}</dt><dd>{quizHistory.length}</dd></div></dl>
       <div className="profile-favorites"><div><h3>{hindi ? "पसंदीदा लेखक" : "Favourite authors"}</h3><p>{details.favoriteAuthors?.length ? details.favoriteAuthors.join(" · ") : (hindi ? "अभी नहीं जोड़ा गया" : "Not added yet")}</p></div><div><h3>{hindi ? "पसंदीदा किताबें" : "Favourite books"}</h3><p>{details.favoriteBooks?.length ? details.favoriteBooks.join(" · ") : (hindi ? "अभी नहीं जोड़ा गया" : "Not added yet")}</p></div></div>
       <label className="profile-toggle"><input type="checkbox" checked={details.leaderboardOptIn ?? false} disabled={savingOptIn} onChange={toggleOptIn} /><span>{hindi ? "मेरा स्कोर लीडरबोर्ड पर दिखाएँ" : "Show my score on the leaderboard"}</span></label>
-      <button type="button" onClick={forgetMe} className="profile-forget"><LogOut className="size-4" />{hindi ? "मेरा डेटा हटाएँ" : "Delete my data"}</button>
+      <div className="mt-4 flex flex-wrap items-center gap-3">
+        <button type="button" onClick={handleSignOut} className="profile-signout"><LogOut className="size-4" />{hindi ? "साइन आउट" : "Sign out"}</button>
+        <button type="button" onClick={forgetMe} className="profile-forget"><Trash2 className="size-4" />{hindi ? "मेरा डेटा हटाएँ" : "Delete my data"}</button>
+      </div>
     </div>
 
     <div className="dashboard-card mt-5">

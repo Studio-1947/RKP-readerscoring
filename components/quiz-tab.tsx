@@ -93,10 +93,12 @@ export function QuizTab({ hindi }: { hindi: boolean }) {
     event.preventDefault();
     const next: Partial<Record<keyof ReaderDetails, string>> = {};
     if (!details.name.trim()) next.name = hindi ? "यह जानकारी भरें।" : "Complete this field.";
-    const age = Number(details.age);
-    if (!Number.isInteger(age) || age < 5 || age > 120) next.age = hindi ? "5 से 120 के बीच आयु भरें।" : "Enter an age from 5 to 120.";
-    if (details.phone.replace(/\D/g, "").length < 10) next.phone = hindi ? "मान्य फ़ोन नंबर भरें।" : "Enter a valid phone number.";
-    if (!details.place.trim()) next.place = hindi ? "यह जानकारी भरें।" : "Complete this field.";
+    if (details.age) {
+      const age = Number(details.age);
+      if (!Number.isInteger(age) || age < 5 || age > 120) next.age = hindi ? "5 से 120 के बीच आयु भरें।" : "Enter an age from 5 to 120.";
+    }
+    if (details.phone && details.phone.replace(/\D/g, "").length < 10) next.phone = hindi ? "मान्य फ़ोन नंबर भरें।" : "Enter a valid phone number.";
+    if (details.email && !/^\S+@\S+\.\S+$/.test(details.email)) next.email = hindi ? "मान्य ईमेल भरें।" : "Enter a valid email.";
     setErrors(next);
     if (Object.keys(next).length || !consent) {
       if (!consent) setSaveError(hindi ? "जारी रखने के लिए सहमति दें।" : "Please provide consent to continue.");
@@ -323,9 +325,9 @@ export function QuizTab({ hindi }: { hindi: boolean }) {
         <div className="grid gap-4 sm:grid-cols-2">
           <label className="block text-sm font-semibold text-stone-700">{hindi ? "पूरा नाम *" : "Full name *"}<input autoFocus required value={details.name} onChange={(e) => onNameChange(e.target.value)} className={field} />{errors.name && <span className="mt-1 block text-xs font-medium text-[#b42332]">{errors.name}</span>}</label>
           <label className="block text-sm font-semibold text-stone-700">{hindi ? "यूज़रनेम / हैंडल (स्वचालित)" : "Username / handle (auto)"}<input placeholder="@username" value={details.username ?? ""} onChange={(e) => { setUserTouchedUsername(true); setDetails({ ...details, username: e.target.value }); }} className={field} /></label>
-          <label className="block text-sm font-semibold text-stone-700">{hindi ? "आयु" : "Age"}<input value={details.age} onChange={(e) => setDetails({ ...details, age: e.target.value })} type="number" min="5" max="120" className={field} />{errors.age && <span className="mt-1 block text-xs font-medium text-[#b42332]">{errors.age}</span>}</label>
-          <label className="block text-sm font-semibold text-stone-700">{hindi ? "फ़ोन नंबर" : "Phone number"}<input value={details.phone} onChange={(e) => setDetails({ ...details, phone: e.target.value })} inputMode="tel" className={field} />{errors.phone && <span className="mt-1 block text-xs font-medium text-[#b42332]">{errors.phone}</span>}</label>
-          <label className="block text-sm font-semibold text-stone-700">{hindi ? "शहर / स्थान" : "City / place"}<input value={details.place} onChange={(e) => setDetails({ ...details, place: e.target.value })} className={field} />{errors.place && <span className="mt-1 block text-xs font-medium text-[#b42332]">{errors.place}</span>}</label>
+          <label className="block text-sm font-semibold text-stone-700">{hindi ? "आयु (ऐच्छिक)" : "Age (optional)"}<input value={details.age} onChange={(e) => setDetails({ ...details, age: e.target.value })} type="number" min="5" max="120" className={field} />{errors.age && <span className="mt-1 block text-xs font-medium text-[#b42332]">{errors.age}</span>}</label>
+          <label className="block text-sm font-semibold text-stone-700">{hindi ? "फ़ोन नंबर (ऐच्छिक)" : "Phone number (optional)"}<input value={details.phone} onChange={(e) => setDetails({ ...details, phone: e.target.value })} inputMode="tel" className={field} />{errors.phone && <span className="mt-1 block text-xs font-medium text-[#b42332]">{errors.phone}</span>}</label>
+          <label className="block text-sm font-semibold text-stone-700">{hindi ? "शहर / स्थान (ऐच्छिक)" : "City / place (optional)"}<input value={details.place} onChange={(e) => setDetails({ ...details, place: e.target.value })} className={field} />{errors.place && <span className="mt-1 block text-xs font-medium text-[#b42332]">{errors.place}</span>}</label>
           <label className="flex items-start gap-3 rounded-xl border border-[#eadabb] bg-white px-4 py-3 text-xs leading-5 text-stone-600 sm:col-span-2"><input checked={consent} onChange={(e) => setConsent(e.target.checked)} type="checkbox" className="mt-0.5 size-4 accent-[#b42332]" /><span>{hindi ? "मैं सहमत हूँ कि राजकमल मेरे स्कोर के लिए ये विवरण इस्तेमाल कर सकता है।" : "I agree that Rajkamal may use these details for my score."}</span></label>
           <label className="flex items-start gap-3 text-xs leading-5 text-stone-600 sm:col-span-2"><input type="checkbox" checked={details.leaderboardOptIn ?? true} onChange={(e) => setDetails({ ...details, leaderboardOptIn: e.target.checked })} className="mt-0.5 size-4 accent-[#b42332]" /><span>{hindi ? "अपना स्कोर लीडरबोर्ड में दिखाएँ।" : "Show my score on the leaderboard."}</span></label>
         </div>

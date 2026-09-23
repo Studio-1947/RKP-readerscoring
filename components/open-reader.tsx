@@ -6,14 +6,23 @@ import { ReaderDashboard } from "@/components/reader-dashboard";
 import { QuizTab } from "@/components/quiz-tab";
 import { ReaderProfile } from "@/components/reader-profile";
 import { AuthControls } from "@/components/auth-controls";
+import { BrandLogo } from "@/components/brand-logo";
 import { downloadScoreCard as downloadScoreCardImage } from "@/lib/score-card";
-import { Info, Languages, Mic, Moon, Play, RotateCcw, Share2, Sun, Timer, Volume2, X } from "lucide-react";
+import { BookOpen, HelpCircle, Info, Languages, Mic, Moon, Play, RotateCcw, Share2, Sun, Timer, TrendingUp, Trophy, UserRound, Volume2, X } from "lucide-react";
 import { ReadingScore, scoreReading } from "@/lib/scoring";
 import { loadSavedReaderDetails, saveReaderAttempt } from "@/lib/reader-storage";
 import { createClient } from "@/utils/supabase/client";
 
 type Language = "hi" | "en";
 type View = "practice" | "quiz" | "leaderboard" | "progress" | "profile";
+
+const navConfig: Record<View, { icon: React.ReactNode; labelHi: string; labelEn: string; shortHi: string; shortEn: string }> = {
+  practice: { icon: <BookOpen className="size-4 shrink-0 sm:size-4.5" />, labelHi: "आज का पाठ", labelEn: "Today’s reading", shortHi: "पाठ", shortEn: "Read" },
+  quiz: { icon: <HelpCircle className="size-4 shrink-0 sm:size-4.5" />, labelHi: "क्विज़", labelEn: "Quiz", shortHi: "क्विज़", shortEn: "Quiz" },
+  leaderboard: { icon: <Trophy className="size-4 shrink-0 sm:size-4.5" />, labelHi: "लीडरबोर्ड", labelEn: "Leaderboard", shortHi: "लीडरबोर्ड", shortEn: "Leaderboard" },
+  progress: { icon: <TrendingUp className="size-4 shrink-0 sm:size-4.5" />, labelHi: "मेरी प्रगति", labelEn: "My progress", shortHi: "प्रगति", shortEn: "Progress" },
+  profile: { icon: <UserRound className="size-4 shrink-0 sm:size-4.5" />, labelHi: "प्रोफ़ाइल", labelEn: "Profile", shortHi: "प्रोफ़ाइल", shortEn: "Profile" },
+};
 type Status = "ready" | "recording" | "transcribing" | "details" | "result" | "unsupported";
 type Passage = { id: string; sequence: number; title: string; difficulty_editorial: string; lines: string[]; reference_text: string; word_count_whitespace: number };
 type Details = { name: string; age: string; phone: string; email: string; place: string; consent: boolean; leaderboardOptIn: boolean };
@@ -92,7 +101,7 @@ const copy = {
     start: "रिकॉर्ड करना शुरू करें", finish: "रिकॉर्डिंग पूरी करें", ready: "तैयार होने पर शुरू करें", help: "पंक्तियाँ अपनी आवाज़ में पढ़ें",
     recording: "आपकी आवाज़ रिकॉर्ड हो रही है", recordingHelp: "आराम से और स्पष्ट पढ़ें", transcribing: "आपकी reading जाँची जा रही है…", transcribingHelp: "कुछ क्षण लग सकते हैं",
     profileTag: "स्कोर अनलॉक करें", profileTitle: "अपना विस्तृत स्कोर देखें", profileHelp: "अपनी accuracy, pace और passage coverage देखने के लिए ये विवरण भरें।",
-    name: "पूरा नाम", age: "आयु", phone: "फ़ोन नंबर", email: "ईमेल (वैकल्पिक)", place: "शहर / स्थान",
+    name: "पूरा नाम *", age: "आयु (ऐच्छिक)", phone: "फ़ोन नंबर (ऐच्छिक)", email: "ईमेल (ऐच्छिक)", place: "शहर / स्थान (ऐच्छिक)",
     consent: "मैं सहमत हूँ कि राजकमल मेरे स्कोर के लिए ये विवरण इस्तेमाल कर सकता है।",
     privacy: "आपकी रिकॉर्डिंग सुरक्षित ट्रांसक्रिप्शन सेवा को भेजी जाती है और काम पूरा होते ही हटाने का अनुरोध किया जाता है। यह ऐप सहमति के बाद आपके विवरण, पहचाना गया पाठ और स्कोर सहेजता है।",
     view: "मेरा स्कोर देखें", saving: "सहेजा जा रहा है…", result: "आपका परिणाम", great: "आपका पाठ पूरा हुआ", score: "कुल स्कोर",
@@ -113,7 +122,7 @@ const copy = {
     start: "Start recording", finish: "Finish recording", ready: "Ready when you are", help: "Read the passage aloud in your own voice",
     recording: "Your voice is being recorded", recordingHelp: "Read slowly and clearly", transcribing: "Checking your reading…", transcribingHelp: "This may take a few moments",
     profileTag: "UNLOCK YOUR SCORE", profileTitle: "See your reading breakdown", profileHelp: "Complete these details to unlock your accuracy, pace and passage-coverage metrics.",
-    name: "Full name", age: "Age", phone: "Phone number", email: "Email (optional)", place: "City / place",
+    name: "Full name *", age: "Age (optional)", phone: "Phone number (optional)", email: "Email (optional)", place: "City / place (optional)",
     consent: "I agree that Rajkamal may use these details for my score.",
     privacy: "Your recording is sent to a secure transcription service and deletion is requested after processing. This app saves your details, recognized text and score after consent.",
     view: "View my score", saving: "Saving…", result: "YOUR RESULT", great: "Your reading is complete", score: "TOTAL SCORE",
@@ -221,6 +230,7 @@ export default function OpenReader({ passages }: Props) {
   const startedAt = useRef(0);
   const attempts = useRef(0);
   const savedReaderRef = useRef<Details | null>(null);
+  const [profileRefreshKey, setProfileRefreshKey] = useState(0);
 
   const passage = passages[index];
   const t = copy[language];
@@ -230,9 +240,18 @@ export default function OpenReader({ passages }: Props) {
 
   async function refreshSavedReader() {
     const saved = await loadSavedReaderDetails().catch(() => null);
-    if (!saved) { savedReaderRef.current = null; setSavedReader(null); return; }
+    if (!saved) {
+      savedReaderRef.current = null;
+      setSavedReader(null);
+      setDetails({ name: "", age: "", phone: "", email: "", place: "", consent: false, leaderboardOptIn: true });
+      setProfileRefreshKey((k) => k + 1);
+      return;
+    }
     const restored: Details = { ...saved, consent: true, leaderboardOptIn: saved.leaderboardOptIn === true };
-    savedReaderRef.current = restored; setSavedReader(restored); setDetails(restored);
+    savedReaderRef.current = restored;
+    setSavedReader(restored);
+    setDetails(restored);
+    setProfileRefreshKey((k) => k + 1);
   }
 
   useEffect(() => {
@@ -683,11 +702,12 @@ export default function OpenReader({ passages }: Props) {
     event.preventDefault();
     const next: Partial<Record<keyof Details, string>> = {};
     if (!details.name.trim()) next.name = t.missing;
-    const age = Number(details.age);
-    if (!Number.isInteger(age) || age < 5 || age > 120) next.age = t.ageError;
-    if (details.phone.replace(/\D/g, "").length < 10) next.phone = t.phoneError;
+    if (details.age) {
+      const age = Number(details.age);
+      if (!Number.isInteger(age) || age < 5 || age > 120) next.age = t.ageError;
+    }
+    if (details.phone && details.phone.replace(/\D/g, "").length < 10) next.phone = t.phoneError;
     if (details.email && !/^\S+@\S+\.\S+$/.test(details.email)) next.email = t.emailError;
-    if (!details.place.trim()) next.place = t.missing;
     setErrors(next);
     if (Object.keys(next).length) return;
     setIsSaving(true); setError("");
@@ -730,8 +750,20 @@ export default function OpenReader({ passages }: Props) {
 
   return <main className="padhaku-shell min-h-screen pb-24">
     <header className="reader-topbar"><div className="reader-topbar-inner">
-      <div className="flex min-w-0 items-center gap-2.5 sm:gap-3 lg:gap-4"><p className="reader-chant whitespace-nowrap text-sm font-bold text-[#7e1421] sm:text-lg lg:text-2xl">पढ़ाकू</p></div>
-      <nav className="desktop-reader-nav" aria-label={language === "hi" ? "मुख्य नेविगेशन" : "Main navigation"}>{(["practice", "quiz", "leaderboard", "progress", "profile"] as View[]).map((view) => <button key={view} disabled={busy} aria-current={activeView === view ? "page" : undefined} className={activeView === view ? "active" : ""} onClick={() => setActiveView(view)}>{view === "practice" ? (language === "hi" ? "आज का पाठ" : "Today’s reading") : view === "quiz" ? (language === "hi" ? "क्विज़" : "Quiz") : view === "leaderboard" ? (language === "hi" ? "लीडरबोर्ड" : "Leaderboard") : view === "progress" ? (language === "hi" ? "मेरी प्रगति" : "My progress") : (language === "hi" ? "प्रोफ़ाइल" : "Profile")}</button>)}</nav>
+      <div className="flex shrink-0 items-center">
+        <BrandLogo className="h-7 w-auto sm:h-8 lg:h-9.5" />
+      </div>
+      <nav className="desktop-reader-nav" aria-label={language === "hi" ? "मुख्य नेविगेशन" : "Main navigation"}>
+        {(["practice", "quiz", "leaderboard", "progress", "profile"] as View[]).map((view) => {
+          const item = navConfig[view];
+          return (
+            <button key={view} disabled={busy} aria-current={activeView === view ? "page" : undefined} className={activeView === view ? "active" : ""} onClick={() => setActiveView(view)}>
+              {item.icon}
+              <span>{language === "hi" ? item.labelHi : item.labelEn}</span>
+            </button>
+          );
+        })}
+      </nav>
       <div className="flex shrink-0 items-center gap-2"><button type="button" disabled={busy} onClick={toggleTheme} className="reader-icon-button" aria-label={darkMode ? "Use light theme" : "Use dark theme"}>{darkMode ? <Sun className="size-4" /> : <Moon className="size-4" />}</button><button disabled={busy} onClick={() => setLanguage(language === "hi" ? "en" : "hi")} className="flex items-center gap-1.5 rounded-xl border border-stone-300 bg-white px-3 py-2 text-xs font-bold text-[#7e1421] sm:gap-2 sm:px-4 sm:text-sm lg:px-5 lg:text-base disabled:cursor-wait disabled:opacity-50"><Languages className="size-3.5 sm:size-4 lg:size-4.5" />{language === "hi" ? "English" : "हिंदी"}</button><AuthControls hindi={language === "hi"} onAuthenticated={refreshSavedReader} onProfile={() => setActiveView("profile")} /></div>
     </div></header>
     {activeView === "practice" ? <section className="padhaku-practice">
@@ -804,8 +836,18 @@ export default function OpenReader({ passages }: Props) {
         <button onClick={() => setStatus("details")} className="rounded-full bg-[#b42332] px-4 py-2 text-sm font-bold text-white hover:bg-[#7e1421]">{language === "hi" ? "जारी रखें →" : "Resume →"}</button>
       </div>}
       {status === "result" && <section className="mt-5 rounded-xl border border-[#e5b043]/70 bg-[#fffaf0] p-5  sm:p-7"><div className="flex flex-col justify-between gap-5 sm:flex-row sm:items-start"><div><p className="flex items-center gap-2 text-xs font-bold tracking-[.16em] text-[#b42332]">{t.result}</p><h2 className="serif mt-2 text-3xl font-bold">{t.great}</h2></div><div className="rounded-2xl bg-[#b42332] px-6 py-4 text-center text-white"><p className="text-xs font-bold uppercase tracking-widest text-white/70">{t.score}</p><p className="serif text-4xl font-bold">{score.total}<span className="text-lg text-white/70">/100</span></p></div></div><div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4"><Metric label={t.accuracy} value={`${score.accuracy}%`} /><Metric label={t.fluency} value={`${score.fluency}%`} /><Metric label={t.completion} value={`${score.completion}%`} /><Metric label={t.speed} value={`${score.wordsPerMinute} WPM`} /></div><div className="mt-6 flex flex-col gap-3 border-t border-[#eadabb] pt-5 sm:flex-row"><button onClick={resetAttempt} className="flex flex-1 items-center justify-center gap-2 rounded-full border border-[#b42332] px-4 py-3 text-sm font-bold text-[#b42332]"><RotateCcw className="size-4" />{t.retry}</button><button onClick={downloadScoreCard} className="flex flex-1 items-center justify-center rounded-full border border-[#b42332] px-4 py-3 text-sm font-bold text-[#b42332]">{language === "hi" ? "स्कोर कार्ड डाउनलोड" : "Download score card"}</button><button onClick={share} className="flex flex-1 items-center justify-center gap-2 rounded-full bg-[#b42332] px-4 py-3 text-sm font-bold text-white"><Share2 className="size-4" />{t.share}</button></div></section>}
-    </section> : activeView === "quiz" ? <QuizTab hindi={language === "hi"} /> : activeView === "profile" ? <ReaderProfile hindi={language === "hi"} refresh={status} /> : <ReaderDashboard view={activeView} hindi={language === "hi"} refresh={status} onPractice={() => setActiveView("practice")} />}
-    {status !== "details" && <nav className="mobile-reader-nav" aria-label={language === "hi" ? "मोबाइल नेविगेशन" : "Mobile navigation"}>{(["practice", "quiz", "leaderboard", "progress", "profile"] as View[]).map((view) => <button key={view} disabled={busy} aria-current={activeView === view ? "page" : undefined} className={activeView === view ? "active" : ""} onClick={() => setActiveView(view)}>{view === "practice" ? (language === "hi" ? "पाठ" : "Read") : view === "quiz" ? (language === "hi" ? "क्विज़" : "Quiz") : view === "leaderboard" ? (language === "hi" ? "लीडरबोर्ड" : "Leaderboard") : view === "progress" ? (language === "hi" ? "प्रगति" : "Progress") : (language === "hi" ? "प्रोफ़ाइल" : "Profile")}</button>)}</nav>}
+    </section> : activeView === "quiz" ? <QuizTab hindi={language === "hi"} /> : activeView === "profile" ? <ReaderProfile hindi={language === "hi"} refresh={`${status}-${profileRefreshKey}`} onSignedOut={refreshSavedReader} /> : <ReaderDashboard view={activeView} hindi={language === "hi"} refresh={`${status}-${profileRefreshKey}`} onPractice={() => setActiveView("practice")} />}
+    {status !== "details" && <nav className="mobile-reader-nav" aria-label={language === "hi" ? "मोबाइल नेविगेशन" : "Mobile navigation"}>
+      {(["practice", "quiz", "leaderboard", "progress", "profile"] as View[]).map((view) => {
+        const item = navConfig[view];
+        return (
+          <button key={view} disabled={busy} aria-current={activeView === view ? "page" : undefined} className={activeView === view ? "active" : ""} onClick={() => setActiveView(view)}>
+            {item.icon}
+            <span>{language === "hi" ? item.shortHi : item.shortEn}</span>
+          </button>
+        );
+      })}
+    </nav>}
   </main>;
 }
 
