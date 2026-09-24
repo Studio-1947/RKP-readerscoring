@@ -8,7 +8,7 @@ import { ReaderProfile } from "@/components/reader-profile";
 import { AuthControls } from "@/components/auth-controls";
 import { BrandLogo } from "@/components/brand-logo";
 import { downloadScoreCard as downloadScoreCardImage } from "@/lib/score-card";
-import { BookOpen, HelpCircle, Info, Languages, Mic, Moon, Play, RotateCcw, Share2, Sun, Timer, TrendingUp, Trophy, UserRound, Volume2, X } from "lucide-react";
+import { BookOpen, FileCode, HelpCircle, Info, Languages, Mic, Moon, Play, RotateCcw, Share2, Sun, Timer, TrendingUp, Trophy, UserRound, Volume2, X } from "lucide-react";
 import { ReadingScore, scoreReading } from "@/lib/scoring";
 import { loadSavedReaderDetails, saveReaderAttempt } from "@/lib/reader-storage";
 import { createClient } from "@/utils/supabase/client";
@@ -185,7 +185,8 @@ function speechChunks(lines: string[], maxLength = 150) {
   return chunks;
 }
 
-export default function OpenReader({ passages }: Props) {
+export default function OpenReader({ passages: initialPassages }: Props) {
+  const [passages, setPassages] = useState<Passage[]>(initialPassages);
   const [language, setLanguage] = useState<Language>("hi");
   const [darkMode, setDarkMode] = useState(false);
   const [activeView, setActiveView] = useState<View>("practice");
@@ -231,6 +232,16 @@ export default function OpenReader({ passages }: Props) {
   const attempts = useRef(0);
   const savedReaderRef = useRef<Details | null>(null);
   const [profileRefreshKey, setProfileRefreshKey] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      void fetch("/api/content/passages").then((response) => response.ok ? response.json() : null).then((payload: { passages?: Passage[] } | null) => {
+        if (!cancelled && payload?.passages?.length) { setPassages(payload.passages); setIndex(0); }
+      }).catch(() => undefined);
+    }, 0);
+    return () => { cancelled = true; window.clearTimeout(timer); };
+  }, []);
 
   const passage = passages[index];
   const t = copy[language];
@@ -764,7 +775,7 @@ export default function OpenReader({ passages }: Props) {
           );
         })}
       </nav>
-      <div className="flex shrink-0 items-center gap-2"><button type="button" disabled={busy} onClick={toggleTheme} className="reader-icon-button" aria-label={darkMode ? "Use light theme" : "Use dark theme"}>{darkMode ? <Sun className="size-4" /> : <Moon className="size-4" />}</button><button disabled={busy} onClick={() => setLanguage(language === "hi" ? "en" : "hi")} className="flex items-center gap-1.5 rounded-xl border border-stone-300 bg-white px-3 py-2 text-xs font-bold text-[#7e1421] sm:gap-2 sm:px-4 sm:text-sm lg:px-5 lg:text-base disabled:cursor-wait disabled:opacity-50"><Languages className="size-3.5 sm:size-4 lg:size-4.5" />{language === "hi" ? "English" : "हिंदी"}</button><AuthControls hindi={language === "hi"} onAuthenticated={refreshSavedReader} onProfile={() => setActiveView("profile")} /></div>
+      <div className="flex shrink-0 items-center gap-2"><a href="/docs" target="_blank" rel="noopener noreferrer" className="reader-icon-button" title={language === "hi" ? "API दस्तावेज़ (Swagger UI)" : "API Docs (Swagger UI)"} aria-label="API Docs"><FileCode className="size-4" /></a><button type="button" disabled={busy} onClick={toggleTheme} className="reader-icon-button" aria-label={darkMode ? "Use light theme" : "Use dark theme"}>{darkMode ? <Sun className="size-4" /> : <Moon className="size-4" />}</button><button disabled={busy} onClick={() => setLanguage(language === "hi" ? "en" : "hi")} className="flex items-center gap-1.5 rounded-xl border border-stone-300 bg-white px-3 py-2 text-xs font-bold text-[#7e1421] sm:gap-2 sm:px-4 sm:text-sm lg:px-5 lg:text-base disabled:cursor-wait disabled:opacity-50"><Languages className="size-3.5 sm:size-4 lg:size-4.5" />{language === "hi" ? "English" : "हिंदी"}</button><AuthControls hindi={language === "hi"} onAuthenticated={refreshSavedReader} onProfile={() => setActiveView("profile")} /></div>
     </div></header>
     {activeView === "practice" ? <section className="padhaku-practice">
       <div className="padhaku-intro"><div><p className="padhaku-eyebrow">{language === "hi" ? "हिंदी रीडिंग स्कोर" : "HINDI READING SCORE"}</p><h1>{language === "hi" ? "पढ़िए, रिकॉर्ड कीजिए, स्कोर बढ़ाइए।" : "Read, record, improve your score."}</h1><p>{language === "hi" ? "आज का छोटा हिंदी पाठ अपनी आवाज़ में पढ़ें।" : "Read today’s short Hindi passage in your own voice."}</p></div><button onClick={nextPassage} disabled={busy} className="padhaku-new"><RotateCcw className="size-4" />{t.newPassage}</button></div>

@@ -110,6 +110,7 @@ export async function updateLeaderboardOptIn(optIn: boolean) {
 type SaveQuizAttemptInput = {
   details: ReaderDetails;
   answers: Record<string, number>;
+  quizId?: string;
 };
 
 export async function saveQuizAttempt(input: SaveQuizAttemptInput) {
