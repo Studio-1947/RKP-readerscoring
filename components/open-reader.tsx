@@ -185,7 +185,8 @@ function speechChunks(lines: string[], maxLength = 150) {
   return chunks;
 }
 
-export default function OpenReader({ passages }: Props) {
+export default function OpenReader({ passages: initialPassages }: Props) {
+  const [passages, setPassages] = useState<Passage[]>(initialPassages);
   const [language, setLanguage] = useState<Language>("hi");
   const [darkMode, setDarkMode] = useState(false);
   const [activeView, setActiveView] = useState<View>("practice");
@@ -231,6 +232,16 @@ export default function OpenReader({ passages }: Props) {
   const attempts = useRef(0);
   const savedReaderRef = useRef<Details | null>(null);
   const [profileRefreshKey, setProfileRefreshKey] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      void fetch("/api/content/passages").then((response) => response.ok ? response.json() : null).then((payload: { passages?: Passage[] } | null) => {
+        if (!cancelled && payload?.passages?.length) { setPassages(payload.passages); setIndex(0); }
+      }).catch(() => undefined);
+    }, 0);
+    return () => { cancelled = true; window.clearTimeout(timer); };
+  }, []);
 
   const passage = passages[index];
   const t = copy[language];

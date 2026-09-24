@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import "swagger-ui-dist/swagger-ui.css";
 import { openApiSpec } from "@/lib/swagger-spec";
 
@@ -14,7 +15,6 @@ export default function SwaggerUIComponent() {
     async function loadSwaggerUI() {
       try {
         const SwaggerUIBundleModule = await import("swagger-ui-dist/swagger-ui-bundle");
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const SwaggerUIBundle = (SwaggerUIBundleModule as any).default || SwaggerUIBundleModule;
 
         if (isMounted && containerRef.current) {
@@ -76,7 +76,7 @@ export default function SwaggerUIComponent() {
             </svg>
             OpenAPI Spec JSON
           </a>
-          <a
+          <Link
             href="/"
             className="inline-flex items-center gap-2 px-4 py-2.5 text-xs font-semibold text-slate-900 bg-white hover:bg-slate-100 rounded-xl transition-colors shadow-md focus:outline-none focus:ring-2 focus:ring-rose-500"
           >
@@ -84,7 +84,7 @@ export default function SwaggerUIComponent() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
             </svg>
             Back to Application
-          </a>
+          </Link>
         </div>
       </div>
 
