@@ -11,7 +11,7 @@ function passageRecord(value: Record<string, unknown>, defaultStatus: unknown, i
   const lines = suppliedLines.length ? suppliedLines : reference.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   if (!title || !reference || !lines.length) return null;
   const suppliedId = clean(value.id, 100).replace(/[^a-zA-Z0-9_-]/g, "");
-  return { id: suppliedId || `${slug(title)}-${Date.now().toString(36)}-${index + 1}`, title, reference_text: reference, lines, sequence: Number(value.sequence) || index + 1, difficulty_editorial: clean(value.difficulty ?? value.difficulty_editorial, 50) || "Standard", word_count_whitespace: Number(value.wordCount ?? value.word_count_whitespace) || reference.split(/\s+/).filter(Boolean).length, status: status(value.status ?? defaultStatus) };
+  return { id: suppliedId || `${slug(title) || "passage"}-${Date.now().toString(36)}-${index + 1}`, title, reference_text: reference, lines, sequence: Number(value.sequence) || index + 1, difficulty_editorial: clean(value.difficulty ?? value.difficulty_editorial, 50) || "Standard", word_count_whitespace: Number(value.wordCount ?? value.word_count_whitespace) || reference.split(/\s+/).filter(Boolean).length, status: status(value.status ?? defaultStatus) };
 }
 
 function quizRecord(value: Record<string, unknown>, defaultStatus: unknown) {
