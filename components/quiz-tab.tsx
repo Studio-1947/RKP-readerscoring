@@ -34,32 +34,77 @@ function getReaderHandle(details: ReaderDetails) {
 export function QuizTab({ hindi }: { hindi: boolean }) {
   const [questionBank, setQuestionBank] = useState(quizQuestions);
   const [activeQuizId, setActiveQuizId] = useState<string | undefined>();
-  const questions = useMemo(() => shuffled(questionBank).slice(0, 8), [questionBank]);
+  const [limitReached, setLimitReached] = useState(false);
+  const [questions, setQuestions] = useState<typeof questionBank>([]);
   const [index, setIndex] = useState(0);
   const [selected, setSelected] = useState<number | null>(null);
   const [revealed, setRevealed] = useState(false);
   const [answers, setAnswers] = useState<Record<string, number>>({});
   const [stage, setStage] = useState<Stage>("answering");
   const [details, setDetails] = useState<ReaderDetails>(emptyDetails);
-  const [errors, setErrors] = useState<Partial<Record<keyof ReaderDetails, string>>>( {});
+  const [errors, setErrors] = useState<Partial<Record<keyof ReaderDetails, string>>>({});
   const [consent, setConsent] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
   const [saved, setSaved] = useState(false);
   const [shareFeedback, setShareFeedback] = useState("");
   const [userTouchedUsername, setUserTouchedUsername] = useState(false);
+  const [remainingAttempts, setRemainingAttempts] = useState(3);
 
   useEffect(() => {
+    // Check daily limits
+    const today = new Date().toLocaleDateString();
+    const attemptsKey = `quiz_attempts_${today}`;
+    const attemptsToday = parseInt(localStorage.getItem(attemptsKey) || "0", 10);
+    
+    if (attemptsToday >= 3) {
+      setLimitReached(true);
+      setRemainingAttempts(0);
+      return;
+    }
+    
+    setRemainingAttempts(3 - attemptsToday);
+
     void fetch("/api/content/quiz").then((response) => response.ok ? response.json() : null).then((payload: { quiz?: { id: string; questions: Array<{ id: string; question_hi: string; question_en: string; options: string[]; correct_index: number }> } | null } | null) => {
       if (!payload?.quiz?.questions?.length) return;
       setActiveQuizId(payload.quiz.id);
-      setQuestionBank(payload.quiz.questions.map((question) => ({ id: question.id, question: { hi: question.question_hi, en: question.question_en }, options: question.options.map((option) => ({ hi: option, en: option })), correctIndex: question.correct_index })));
+      
+      const parsedBank = payload.quiz.questions.map((question) => ({ id: question.id, question: { hi: question.question_hi, en: question.question_en }, options: question.options.map((option) => ({ hi: option, en: option })), correctIndex: question.correct_index }));
+      
+      // Filter out seen questions
+      let seenIds: string[] = [];
+      try { seenIds = JSON.parse(localStorage.getItem("quiz_seen_questions") || "[]"); } catch {}
+      
+      let unseenBank = parsedBank.filter((q) => !seenIds.includes(q.id));
+      
+      // If they somehow answered all 79 questions, reset the pool so they can still play!
+      if (unseenBank.length < 8) {
+        unseenBank = parsedBank;
+        localStorage.setItem("quiz_seen_questions", "[]");
+      }
+      
+      const selected = shuffled(unseenBank).slice(0, 8);
+      
+      setQuestionBank(parsedBank);
+      setQuestions(selected);
       setIndex(0); setAnswers({}); setSelected(null); setRevealed(false);
     }).catch(() => undefined);
   }, []);
 
   const question = questions[index];
   const isLast = index === questions.length - 1;
+
+  function markQuizCompleteLocally() {
+    const today = new Date().toLocaleDateString();
+    const attemptsKey = `quiz_attempts_${today}`;
+    const attemptsToday = parseInt(localStorage.getItem(attemptsKey) || "0", 10);
+    localStorage.setItem(attemptsKey, String(attemptsToday + 1));
+    
+    let seenIds: string[] = [];
+    try { seenIds = JSON.parse(localStorage.getItem("quiz_seen_questions") || "[]"); } catch {}
+    const newSeenIds = Array.from(new Set([...seenIds, ...questions.map(q => q.id)]));
+    localStorage.setItem("quiz_seen_questions", JSON.stringify(newSeenIds));
+  }
 
   function computeScore(finalAnswers: Record<string, number>) {
     const correct = questions.filter((item) => finalAnswers[item.id] === item.correctIndex).length;
@@ -81,6 +126,9 @@ export function QuizTab({ hindi }: { hindi: boolean }) {
       setRevealed(false);
       return;
     }
+    
+    markQuizCompleteLocally();
+    
     const { correct, score } = computeScore(answers);
     const savedDetails = await loadSavedReaderDetails().catch(() => null);
     if (savedDetails) {
@@ -348,10 +396,40 @@ export function QuizTab({ hindi }: { hindi: boolean }) {
     </section>;
   }
 
+  if (limitReached) {
+    return (
+      <section className="quiz-fullscreen flex flex-col items-center justify-center p-6 text-center">
+        <div className="padhaku-intro mb-6">
+          <p className="padhaku-eyebrow text-[#e5b043]">{hindi ? "दैनिक सीमा समाप्त" : "DAILY LIMIT REACHED"}</p>
+          <h1 className="text-3xl font-black text-white">{hindi ? "कल फिर से खेलें!" : "Play again tomorrow!"}</h1>
+        </div>
+        <div className="max-w-md rounded-2xl border border-[#e5b043]/30 bg-[#25191b] p-6 text-stone-300">
+          <p className="mb-4">
+            {hindi
+              ? "आपने आज के लिए 3 क्विज़ की अधिकतम सीमा पूरी कर ली है। आपके स्कोर लीडरबोर्ड में दर्ज हो चुके हैं।"
+              : "You have reached your maximum limit of 3 quiz attempts for today. Your scores have been recorded on the leaderboard."}
+          </p>
+          <p className="font-semibold text-white">
+            {hindi
+              ? "कल नई चुनौती और नए प्रश्नों के साथ वापस आएं!"
+              : "Come back tomorrow for a new challenge and fresh questions!"}
+          </p>
+        </div>
+      </section>
+    );
+  }
+
+  if (!questions.length || !question) return null;
+
   return <section className="quiz-fullscreen">
     <div className="quiz-progress"><div style={{ width: `${((index + 1) / questions.length) * 100}%` }} /></div>
     <div className="quiz-body">
-      <p className="quiz-counter">{hindi ? `प्रश्न ${index + 1} / ${questions.length}` : `QUESTION ${index + 1} / ${questions.length}`}</p>
+      <div className="flex items-center justify-between mb-4">
+        <p className="quiz-counter mb-0">{hindi ? `प्रश्न ${index + 1} / ${questions.length}` : `QUESTION ${index + 1} / ${questions.length}`}</p>
+        <p className="text-xs font-bold uppercase tracking-widest text-stone-400">
+          {hindi ? `${remainingAttempts} प्रयास शेष` : `${remainingAttempts} ATTEMPTS LEFT`}
+        </p>
+      </div>
       <h1 className="quiz-question">{hindi ? question.question.hi : question.question.en}</h1>
       <div className="quiz-options">
         {question.options.map((option, optionIndex) => {
