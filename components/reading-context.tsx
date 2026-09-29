@@ -15,14 +15,14 @@ export function ScoreGuide({ hindi }: { hindi: boolean }) {
     ["Passage coverage", "10%", "Recognized word count divided by passage word count, capped at 100%. This does not measure correctness."],
     ["Attempts", "5%", "Starts at 100, drops 12 per retry, with a floor of 50. Resets when you reload the page."],
   ];
-  return <details className="mt-5 rounded-xl border border-stone-200 bg-white p-4 sm:p-5">
+  return <details className="mt-6 rounded-xl border border-stone-200 bg-white p-4 sm:p-5">
     <summary className="cursor-pointer text-sm font-semibold">{hindi ? "स्कोर कैसे बनता है?" : "How is the score calculated?"}</summary>
     <p className="mt-3 text-sm text-stone-600">{hindi ? "हर माप 0–100। भार के अनुसार जोड़कर निकटतम पूरे अंक में कुल स्कोर बनता है।" : "Each metric is 0–100. We multiply by these weights, add them and round to a whole-number score."}</p>
-    <dl className="mt-4 divide-y divide-stone-100">{rows.map(([name, weight, explanation]) => <div key={name} className="py-3">
+    <dl className="mt-4 grid grid-cols-1 md:grid-cols-4 gap-4 divide-y md:divide-y-0 md:divide-x divide-stone-100 border-t border-stone-100 md:border-none pt-4 md:pt-0">{rows.map(([name, weight, explanation]) => <div key={name} className="pt-3 pb-1 md:py-0 md:pl-4 first:pt-0 md:first:pl-0">
       <dt className="flex justify-between gap-3 text-sm font-semibold"><span>{name}</span><span className="text-[#b42332]">{weight}</span></dt>
       <dd className="mt-1 text-sm leading-6 text-stone-600">{explanation}</dd>
     </div>)}</dl>
-    <p className="mt-3 text-xs leading-5 text-stone-500">{hindi ? "यह अभ्यास का अनुमान है, उच्चारण की जाँच नहीं। माइक्रोफ़ोन, इंटरनेट और browser की पहचान परिणाम को प्रभावित करते हैं।" : "This is a practice estimate, not a pronunciation assessment. Microphone quality, connection and browser recognition affect the result."}</p>
+    <p className="mt-4 text-xs leading-5 text-stone-500">{hindi ? "यह अभ्यास का अनुमान है, उच्चारण की जाँच नहीं। माइक्रोफ़ोन, इंटरनेट और browser की पहचान परिणाम को प्रभावित करते हैं।" : "This is a practice estimate, not a pronunciation assessment. Microphone quality, connection and browser recognition affect the result."}</p>
   </details>;
 }
 
