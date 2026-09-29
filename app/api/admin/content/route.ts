@@ -31,6 +31,15 @@ async function insertQuiz(auth: Awaited<ReturnType<typeof requireAdmin>>, value:
   if (!auth) return { error: "Admin access is required." };
   const parsed = quizRecord(value, defaultStatus);
   if (!parsed) return { error: "Every quiz needs a title and valid questions with two or more options." };
+  
+  const questionTexts = parsed.questions.map((q) => q.question_hi);
+  if (questionTexts.length > 0) {
+    const { data: existing } = await auth.admin.from("admin_quiz_questions").select("question_hi").in("question_hi", questionTexts.slice(0, 50)).limit(1);
+    if (existing && existing.length > 0) {
+      return { error: `Duplicate detected: The question "${existing[0].question_hi.substring(0, 30)}..." already exists in another quiz.` };
+    }
+  }
+  
   const { error: quizError } = await auth.admin.from("admin_quizzes").insert(parsed.quiz);
   if (quizError) return { error: quizError.message };
   const { error: questionError } = await auth.admin.from("admin_quiz_questions").insert(parsed.questions);
