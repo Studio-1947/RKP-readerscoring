@@ -8,7 +8,12 @@ export async function POST(request: Request) {
   const auth = await requireUser(request).catch(() => null);
   if (!auth) return Response.json({ error: "A reader session is required." }, { status: 401 });
   const body = await request.json().catch(() => null) as { passageId?: unknown; durationSeconds?: unknown; proof?: unknown } | null;
-  const passage = typeof body?.passageId === "string" ? library.samples.find((item) => item.id === body.passageId) : undefined;
+  const passageId = typeof body?.passageId === "string" ? body.passageId : "";
+  let passage: { id: string; sequence: number; title: string; reference_text: string } | undefined = library.samples.find((item) => item.id === passageId);
+  if (!passage && passageId) {
+    const { data } = await auth.admin.from("reader_passages").select("id,sequence,title,reference_text").eq("id", passageId).eq("status", "published").maybeSingle();
+    if (data) passage = data;
+  }
   const transcript = verifyTranscriptionProof(body?.proof);
   const durationSeconds = Number(body?.durationSeconds);
   if (!passage || !transcript || !Number.isInteger(durationSeconds) || durationSeconds < 2 || durationSeconds > 1800) return Response.json({ error: "Invalid verified reading submission." }, { status: 400 });

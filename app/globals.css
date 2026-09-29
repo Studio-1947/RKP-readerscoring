@@ -78,6 +78,8 @@ html.dark .view-heading h1 {
 
 .serif, .font-mono { font-family: var(--font-google-sans), "Google Sans", "Noto Sans Devanagari", "Nirmala UI", Arial, sans-serif; }
 button, input, textarea, select { font: inherit; }
+.admin-input { display:block; width:100%; margin-top:.4rem; border:1px solid #d6d3d1; border-radius:.65rem; background:#fff; padding:.7rem .8rem; color:#1c1917; font-size:.9rem; font-weight:400; outline:none; }
+.admin-input:focus { border-color:#b42332; box-shadow:0 0 0 3px rgba(180,35,50,.12); }
 button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible, summary:focus-visible, audio:focus-visible { outline: 3px solid #2f6fed; outline-offset: 3px; }
 button:disabled { cursor: not-allowed; opacity: .55; }
 

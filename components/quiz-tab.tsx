@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Check, Download, Info, RotateCcw, Share2, X } from "lucide-react";
 import { quizQuestions } from "@/lib/quiz-data";
 import { loadSavedReaderDetails, saveQuizAttempt, type ReaderDetails } from "@/lib/reader-storage";
@@ -32,7 +32,9 @@ function getReaderHandle(details: ReaderDetails) {
 }
 
 export function QuizTab({ hindi }: { hindi: boolean }) {
-  const questions = useMemo(() => shuffled(quizQuestions).slice(0, 8), []);
+  const [questionBank, setQuestionBank] = useState(quizQuestions);
+  const [activeQuizId, setActiveQuizId] = useState<string | undefined>();
+  const questions = useMemo(() => shuffled(questionBank).slice(0, 8), [questionBank]);
   const [index, setIndex] = useState(0);
   const [selected, setSelected] = useState<number | null>(null);
   const [revealed, setRevealed] = useState(false);
@@ -46,6 +48,15 @@ export function QuizTab({ hindi }: { hindi: boolean }) {
   const [saved, setSaved] = useState(false);
   const [shareFeedback, setShareFeedback] = useState("");
   const [userTouchedUsername, setUserTouchedUsername] = useState(false);
+
+  useEffect(() => {
+    void fetch("/api/content/quiz").then((response) => response.ok ? response.json() : null).then((payload: { quiz?: { id: string; questions: Array<{ id: string; question_hi: string; question_en: string; options: string[]; correct_index: number }> } | null } | null) => {
+      if (!payload?.quiz?.questions?.length) return;
+      setActiveQuizId(payload.quiz.id);
+      setQuestionBank(payload.quiz.questions.map((question) => ({ id: question.id, question: { hi: question.question_hi, en: question.question_en }, options: question.options.map((option) => ({ hi: option, en: option })), correctIndex: question.correct_index })));
+      setIndex(0); setAnswers({}); setSelected(null); setRevealed(false);
+    }).catch(() => undefined);
+  }, []);
 
   const question = questions[index];
   const isLast = index === questions.length - 1;
@@ -76,7 +87,7 @@ export function QuizTab({ hindi }: { hindi: boolean }) {
       setDetails(savedDetails);
       setIsSaving(true);
       try {
-        await saveQuizAttempt({ details: savedDetails, answers });
+        await saveQuizAttempt({ details: savedDetails, answers, quizId: activeQuizId });
         setSaved(true);
       } catch {
         setSaveError(hindi ? "स्कोर सेव नहीं हो पाया। यह केवल आपकी स्क्रीन पर दिखाया जा रहा है।" : "We could not save this score. It is only shown on your screen.");
@@ -108,7 +119,7 @@ export function QuizTab({ hindi }: { hindi: boolean }) {
     setIsSaving(true);
     const { correct, score } = computeScore(answers);
     try {
-      await saveQuizAttempt({ details, answers });
+      await saveQuizAttempt({ details, answers, quizId: activeQuizId });
       setSaved(true);
     } catch {
       setSaveError(hindi ? "स्कोर सेव नहीं हो पाया। यह केवल आपकी स्क्रीन पर दिखाया जा रहा है।" : "We could not save this score. It is only shown on your screen.");
