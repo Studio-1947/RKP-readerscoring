@@ -20,7 +20,7 @@ export function validEnvironmentAdmin(email: unknown, password: unknown) {
 }
 
 export function issueAdminSession(email: string) {
-  const secret = process.env.ADMIN_SESSION_SECRET || process.env.TRANSCRIPTION_PROOF_SECRET;
+  const secret = process.env.ADMIN_SESSION_SECRET;
   if (!secret) throw new Error("ADMIN_SESSION_SECRET is not configured.");
   const payload = Buffer.from(JSON.stringify({ email, expiresAt: Date.now() + sessionTtlMs })).toString("base64url");
   const signature = createHmac("sha256", secret).update(payload).digest("base64url");
@@ -28,7 +28,7 @@ export function issueAdminSession(email: string) {
 }
 
 function hasEnvironmentAdminSession(request: Request) {
-  const secret = process.env.ADMIN_SESSION_SECRET || process.env.TRANSCRIPTION_PROOF_SECRET;
+  const secret = process.env.ADMIN_SESSION_SECRET;
   const token = request.headers.get("cookie")?.split(";").map((item) => item.trim()).find((item) => item.startsWith(`${sessionName}=`))?.slice(sessionName.length + 1);
   if (!secret || !token) return false;
   const [payload, signature] = token.split(".");
