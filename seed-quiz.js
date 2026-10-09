@@ -1,638 +1,96 @@
-const { createClient } = require('@supabase/supabase-js');
-const fs = require('fs');
-
-const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-const supabase = createClient(url, key);
-
-const rawText = `1.	'क्या भूलूँ क्या याद करूँ किस लेखक की कृति है?
-1. सुमित्रानंदन पंत
-2. महादेवी वर्मा
-3. हरिवंश राय बच्चन #
-4. जयशंकर प्रसाद
-
-
-2.	'बिहारी' मुख्यतः किस रस के कवि हैं?
-1. शांत रस
-2. भक्ति रस
-3. श्रृंगार रस#
-4. करुण रस
-
-
-3.	'अंधा युग' किस विधा की रचना है?
-1. उपन्यास
-2. कहानी
-3. नाटक#
-4. निबंध
-
-
-4.	इनमें से जयशंकर प्रसाद द्वारा रचित कोन सी रचना है?
-1. मधुशाला
-2. कामायनी#
-3. साहित्य देवता
-4. प्रेम प्रलाप
-
-
-5.	इनमें से कोन सी रचना सुमित्रानंदन पंत की नहीं है?
-1. कुकुरमुत्ता#
-2. ग्राम्या
-3. युगति
-4. रजत-रश्मि
-
-
-6.	हिंदी का पहला उपन्यास कौनसा है?
-1. गोदान
-2. परीक्षा गुरु#
-3. राग दरबारी
-4. झूठा सच
-
-
-7.	'अतीत के चलचित्र' किसकी रचना है?
-1. मन्नू भंडारी
-2. कृष्णा सोबती
-3. महाश्वेता देवी
-4. महादेवी वर्मा#
-
-
-8.	तुलसीदास द्वारा रचित लोकप्रिय महाकाव्य कौनसा है?
-1. रामचरितमानस#
-2. रामायण
-3. भगवत गीता
-4. महाभारत
-
-
-9.	'उसने कहा था' कहानी के लेखक कौन हैं?
-1. आचार्य रामचंद्र शुक्ल
-2. चन्द्रधर शर्मा 'गुलेरी'#
-3. सूर्यकांत त्रिपाठी 'निराला'
-4. भारतेंदु हरिश्चंद्र
-
-
-10.	आधुनिक युग की मीरा किसे कहा जाता है?
-1. लता मंगेशकर
-2. महादेवी वर्मा#
-3. सुभद्रा कुमारी चौहान
-4. महाश्वेता देवी
-
-
-11.	इनमें से कबीर की भाषा कौनसी हैं?
-1. खड़ी बोली
-2. अवधी
-3. ब्रज
-4. सधुक्कड़ी#
-
-
-12.	'कलम का सिपाही' किसे कहा जाता है?
-1. रामधारी सिंह दिनकर
-2. प्रेमचंद
-3. यशपाल
-4. जयशंकर प्रसाद
-
-
-13.	प्रेमचंद ने इनमें से किस विधा में रचना नहीं की है?
-1. कविता#
-2. कहानी
-3. उपन्यास
-4. निबंध-लेख
-
-
-14.	'चिंतामणि' किसका निबंध संग्रह है?
-1. भारतेंदु हरिश्चंद्र
-2. रामचंद्र शुक्ल#
-3. हजारी प्रसाद द्विवेदी
-4. महावीर प्रसाद द्विवेदी
-
-
-15.	'कलम का सिपाही' क्या है?
-1. आत्मकथा
-2. जीवनी#
-3. उपन्यास
-4. खण्ड काव्य
-
-
-16.	इनमें से कौनसा उपन्यास प्रेमचंद का नहीं है?
-1. गबन
-2. सेवासदन
-3. वैशाली की नगरवधू#
-4. निर्मला
-
-
-17.	भोजपुरी बोली किस क्षेत्र में बोली जाती है 
-1. दरभंगा#
-2. आजमगढ़
-3. पटना
-4. पूर्णिया
-
-
-18.	'आपका बंटी' क्या है?
-1. कहानी
-2. कविता
-3. उपन्यास#
-4. जीवनी
-
-
-19.	मेघदूत किसकी रचना है ?
-1. कालिदास#
-2. हरिशचन्द्र
-3. मैथिलीशरणगुप्त
-4. भारतेन्दु
-
-
-20.	'चित्रलेखा' उपन्यास के लेखक कौन है?
-1. कमलेश्वर
-2. श्रीलाल शुक्ल
-3. भगवतीचरण वर्मा#
-4. काशीनाथ सिंह
-
-
-21.	'ईदगाह' क्या है?
-1. कहानी#
-2. उपन्यास
-3. निबंध
-4. कविता
-
-
-22.	अवधी बोली का केंद्र स्थान क्या है?
-1. बस्ती
-2. बाराबंकी
-3. बहराइच
-4. अयोध्या#
-
-
-23.	'राम की शक्ति-पूजा' के रचनाकार कौन हैं?
-1. जयशंकर प्रसाद
-2. सूर्यकांत त्रिपाठी 'निराला'#
-3. रामधारी सिंह 'दिनकर'
-4. सुमित्रानंदन पंत
-
-
-24.	इनमें से कौनसी रचना 'दिनकर' की नहीं है?
-1. रश्मिरथी
-2. कुरुक्षेत्र
-3. उर्वशी
-4. कामायनी#
-
-
-25.	 'संस्कृति के चार अध्याय' किसकी रचना है?
-1. सुभद्रा कुमारी चौहान
-2. माखन लाल चतुर्वेदी
-3. भगवती चरण वर्मा
-4. रामधारी सिंह 'दिनकर'#
-
-
-26.	'तमस' उपन्यास के लेखक कौन हैं?
-1. भीष्म साहनी#
-2. हरिमोहन झा
-3. मनोहर श्याम जोशी
-4. रघुवीर सहाय
-
-
-27.	इनमें से कौनसी रचना हरिशंकर परसाई की नहीं है?
-1. विकलांग श्रद्धा का दौर
-2. निठल्ले की डायरी
-3. ठिठुरता हुआ गणतंत्र
-4. एक गधे की आत्मकथा#
-
-
-28.	'शेखर : एक जीवनी' के लेखक कौन है?
-1. नामवर सिंह
-2. मुक्तिबोध
-3. अज्ञेय#
-4. कमलेश्वर
-
-
-29.	'झूठा सच' उपन्यास के लेखक कौन है?
-1. मन्नू भंडारी
-2. यशपाल#
-3. विष्णु खरे
-4. श्रीलाल शुक्ल
-
-
-30.	'पचपन खम्भे लाल दीवारें' किसका उपन्यास हैं? 
-1. अलका सरावगी
-2. उषा प्रियम्वदा#
-3. गीतांजलि श्री
-4. ममता कालिया
-
-
-31.	इनमें से 'रेणु' का लोकप्रिय उपन्यास कौनसा है?
-1. तमस
-2. टोपी शुक्ला
-3. मैला आँचल#
-4. कोहबर की शर्त
-
-
-32.	इनमें से कौनसी सी पुस्तक 'लप्रेक' शृंखला में शामिल नहीं है?
-1. इश्क में शहर होना
-2. इश्क कोई न्यूज़ नहीं
-3. कुछ इश्क किया कुछ काम किया#
-4. इश्क में माटी सोना
-
-
-33.	प्रेमचंद का मूल नाम क्या था?
-1. नवाब राय#
-2. धनपत राय
-3. गोपाल दास
-4. प्रेम सिंह
-
-
-34.	इनमें से कौन सी रचना तुलसीदास की नहीं है?
-1. रामचरितमानस
-2. कवितावली
-3. गीतावली
-4. प्रेम वर्तिका #
-35.	'झांसी की रानी’ नामक लंबी कविता किसकी कृति है?
-1. रामधारी सिंह दिनकर
-2. सुभद्रा कुमारी चौहान#
-3. महादेवी वर्मा
-4. माखनलाल चतुर्वेदी
-36.	“पंच परमेश्वर” कहानी किसकी रचना है?
-1. अमरकांत
-2. जैनेंद्र
-3. प्रेमचंद#
-4. यशपाल
-37.	बाणभट्ट की आत्मकथा किसकी रचना है?
-1. हजारी प्रसाद द्विवेदी#
-2. बाणभट्ट
-3. मुद्राराक्षस
-4. नामवर सिंह
-
-
-38.	'मैं नीर भरी दुख की बदली’ किसकी रचना है?
-1. महादेवी वर्मा#
-2. सुभद्रा कुमारी चौहान
-3. मीराबाई
-4. कबीर
-39.	हिंदी भाषा किस लिपि में लिखी जाती है?
-1. गुरुमुखी
-2. अरबी
-3. देवनागरी#
-4. रोमन
-
-
-40.	हिंदी दिवस कब मनाया जाता है?
-1. 14 नवम्बर
-2. 14 सितंबर#
-3. 14 अगस्त
-4. 14 जनवरी
-
-
-41.	मेरी जीवन यात्रा किस रचनाकार की आत्मकथा है?
-1. यशपाल
-2. राहुल सांकृत्यायन#
-3. मोहन राकेश
-4. केशवदास
-
-
-42.	'आषाढ़ का एक दिन' क्या है?
-1. कहानी
-2. उपन्यास
-3. कविता
-4. नाटक#
-
-
-43.	'दो बैलों की कथा' किसकी कहानी है?
-1. फणीश्वरनाथ रेणु
-2. जयशंकर प्रसाद
-3. प्रेमचंद#
-4. रवीन्द्रनाथ ठाकुर
-
-
-44.	इनमें से कौनसे उपन्यास के लेखक अज्ञेय हैं?
-1. महाभोज
-2. लौटे हुए मुसाफ़िर
-3. नदी के द्वीप#
-4. स्वामी
-
-
-45.	'यही सच है' किसकी कहानी है?
-1. शिवानी
-2. मोहन राकेश
-3. राजेन्द्र यादव
-4. मन्नू भंडारी#
-
-
-46.	'नौकर की कमीज' किसकी रचना है?
-1. नामवर सिंह
-2. निर्मल वर्मा
-3. विनोद कुमार शुक्ल#
-4. भीष्म साहनी
-
-
-47.	'अंधेर नगरी' नाटक के लेखक कौन हैं?
-1. भीष्म साहनी
-2. मोहन राकेश
-3. सुरेन्द्र वर्मा
-4. भारतेंदु हरिश्चंद्र#
-
-
-48.	इनमें से कौनसी रचना मोहन राकेश की नहीं है?
-1. सूरज का सातवां घोड़ा#
-2. लहरों के राजहंस
-3. आधे-अधूरे
-4. आषाढ़ का एक दिन
-
-
-49.	'लिहाफ़' किसकी रचना है?
-1. अमृता प्रीतम
-2. परवीन शाकिर
-3. इस्मत चुगताई#
-4. कृष्णा सोबती
-
-
-50.	'आनंदमठ' के रचनाकार कौन है?
-1. रवीन्द्र नाथ ठाकुर
-2. आचार्य रामचंद्र शुक्ल
-3. बंकिमचंद्र चट्टोपाध्याय#
-4. जयशंकर प्रसाद
-
-
-51.	'काशी का अस्सी' के लेखक कौन हैं?
-1. केदारनाथ सिंह
-2. काशीनाथ सिंह#
-3. केशव प्रसाद मिश्र
-4. केशवचंद्र
-
-
-52.	'आधा गाँव' के लेखक कौन हैं?
-1. भीष्म साहनी
-2. फणीश्वरनाथ रेणु
-3. राही मासूम रज़ा#
-4. अमृतलाल नागर
-
-
-53.	'काबुलीवाला' कहानी के लेखक कौन है?
-1. प्रेमचंद
-2. मोहन राकेश
-3. रवीन्द्रनाथ ठाकुर#
-4. बंकिमचंद्र चट्टोपाध्याय
-
-
-54.	'पूस की रात' किस रचनाकार की रचना है ?
-1. धर्मवीर भारती 
-2. जयशंकर प्रसाद
-3. प्रेमचंद#
-4. मन्नू भण्डारी
-
-
-55.	हिन्दी के अतिरिक्त इनमें से कौन सी भाषा देवनागरी में लिखी जाती है?
-1. पंजाबी
-2. उर्दू
-3. मराठी#
-4. बंगाली
-
-
-56.	इनमें से कौनसी रचना कृष्णा सोबती की नहीं है?
-1. यही सच है#
-2. गुजरात पाकिस्तान से गुजरात हिंदुस्तान
-3. मित्रो मरजानी
-4. ऐ लड़की
-
-
-57.	'एक जिन्दगी काफ़ी नहीं' के लेखक कौन है?
-1. खुशवंत सिंह
-2. कुलदीप नैयर#
-3. कमलेश्वर
-4. निर्मल वर्मा
-
-
-58.	'साकेत' किसकी रचना है?
-1. हजारी प्रसाद द्विवेदी
-2. जयशंकर प्रसाद
-3. सूर्यकान्त त्रिपाठी 'निराला'
-4. मैथिलीशरण गुप्त#
-
-
-59.	‘गाँधीवाद की शव-परीक्षा’ निबन्ध-संग्रह इनमें से किसका है?
-1. धर्मवीर भारती
-2. यशपाल #
-3. रायकृष्ण दास
-4. जैनेन्द्र
-
-
-60.	इनमें से कौन मूल रूप से हिंदी के लेखक है? 
-1. हृषीकेश सुलभ #
-2. गिरीश कर्नाड
-3. अरुंधति राय
-4. दया पवार 
-
-
-61.	इनमें से कौनसा प्रकाशन 'राजकमल प्रकाशन समूह' का हिस्सा नहीं है?
-1. राधाकृष्ण प्रकाशन
-2. लोकभारती प्रकाशन
-3. अक्षर 
-4. देवनागरी प्रकाशन #
-
-
-62.	'होरी' किस उपन्यास के एक पात्र का नाम है?
-गबन
-सेवासदन
-मंगलसूत्र
-गोदान #
-63.	इनमें से कौनसा पात्र 'चित्रलेखा' उपन्यास में नहीं है?
-यशोधरा
-स्कन्दगुप्त #
-बीजगुप्त
-कुमारगिरि 
-
-
-64.	पुरुषोत्तम अग्रवाल की पुस्तक 'अकथ कहानी प्रेम की' इनमें से किस पर आधारित है?
-तुलसी
-जायसी
-रहीम
-कबीर #
-
-
-65.	'अंतिम ऊंचाई' किसकी कविता का शीर्षक है?
-वीरेन डंगवाल
-मंगलेश डबराल
-राजेश जोशी
-कुंअर नारायण #
-
-
-66.	'मैं जग-जीवन का भार लिए फिरता हूँ' पंक्ति किस कवि की कविता से है?
-सोहनलाल द्विवेदी
-हरिवंश राय बच्चन #
-जयशंकर प्रसाद
-रामधारी सिंह दिनकर
-67.	दिनकर की कौनसी रचना 'कर्ण' के चरित्र पर आधारित है?
-कुरुक्षेत्र
-उर्वशी
-परशुराम की प्रतीक्षा
-रश्मिरथी #
-
-
-68.	इनमें से कौन प्रेमचंद की कहानी 'ईदगाह' का मुख्य पात्र है?
-सलीम
-हफ़ीज़
-हामिद #
-समीर
-69.	'एक दुनिया समानांतर' पुस्तक के संपादक कौन है?
-दूधनाथ सिंह
-नीलाभ
-राजेन्द्र यादव #
-ज्ञानरंजन
-70.	'मानसरोवर' किसकी कहानियों का संकलन है?
-जयशंकर प्रसाद 
-भीष्म साहनी
-प्रेमचंद #
-अज्ञेय
-71.	'दिव्या' उपन्यास के रचनाकार कौन है?
-श्रीलाल शुक्ल
-भीष्म साहनी
-यशपाल #
-नागार्जुन
-
-
-72.	'एक कहानी यह भी' किसकी रचना है?
-कृष्णा सोबती
-महाश्वेता देवी
-अमृता प्रीतम
-मन्नू भंडारी # 
-73.	इनमें से कौनसी रचना भगवतीचरण वर्मा की नहीं है?
-रेखा
-चित्रलेखा
-टेढ़े-मेढ़े रास्ते
-कुल्लीभाट #
-74.	'नीम का पेड़' किसकी रचना है?
-विनोद कुमार शुक्ल
-मंजूर एहतेशाम
-राही मासूम रज़ा #
-मनोहर श्याम जोशी
-75.	इनमें से कौनसी रचना कमलेश्वर की नहीं है?
-काले उजले दिन #
-पति, पत्नी और वह
-आगामी अतीत
-वही बात
-76.	'कोहबर की शर्त' उपन्यास के लेखक कौन है?
-विद्यानिवास मिश्र
-केशव प्रसाद मिश्र #
-केशव प्रसाद मौर्य
-द्रोणवीर कोहली
-
-
-77.	'सलाम आखिरी' किसका उपन्यास है?
-अलका सरावगी
-मैत्रेयी पुष्पा
-मधु कांकरिया #
-उषा प्रियम्वदा
-78.	इनमें से किस रचना के अंग्रेजी अनुवाद को अंतरराष्ट्रीय बुकर पुरस्कार से सम्मानित किया गया है?
-राग पहाड़ी
-शिखर की ढलान
-रेत समाधि #
-अपार खुशी का घराना 
-79.	इनमें से कौनसी श्रृंखला राजकमल प्रकाशन से प्रकाशित नहीं होती है?
-प्रतिनिधि कविताएँ
-प्रतिनिधि चुटकुले #
-प्रतिनिधि कहानियाँ
-प्रतिनिधि व्यंग्य`;
-
-function parseQuiz(raw) {
-  const lines = raw.split(/\r?\n/);
-  const questions = [];
-  
-  let currentQuestion = null;
-  let options = [];
-  let correctIndex = 0;
-  
-  function saveCurrent() {
-    if (currentQuestion && options.length >= 2) {
-      questions.push({
-        question_hi: currentQuestion,
-        question_en: currentQuestion,
-        options,
-        correct_index: correctIndex
-      });
-    }
+const fs = require("fs");
+const path = require("path");
+
+function loadEnv(file) {
+  const values = {};
+  for (const line of fs.readFileSync(file, "utf8").split(/\r?\n/)) {
+    const match = line.match(/^([A-Z0-9_]+)=(.*)$/);
+    if (match) values[match[1]] = match[2].replace(/^"|"$/g, "");
   }
-  
-  for (let line of lines) {
-    line = line.trim();
-    if (!line) continue;
-    
-    const startMatch = line.match(/^(\\d+)\\./);
-    
-    if (startMatch) {
-      const num = parseInt(startMatch[1], 10);
-      if (currentQuestion && options.length < 6 && num === options.length + 1) {
-        let opt = line.replace(/^\\d+\\.[\\s\\t]*/, '').trim();
-        if (opt.endsWith('#')) {
-          correctIndex = options.length;
-          opt = opt.slice(0, -1).trim();
-        }
-        options.push(opt);
-        continue;
-      }
-    }
-    
-    if (currentQuestion && !startMatch && !line.match(/^\\d+\\./) && options.length < 6 && (options.length > 0 || line !== currentQuestion)) {
-      let opt = line;
-      if (opt.endsWith('#')) {
-        correctIndex = options.length;
-        opt = opt.slice(0, -1).trim();
-      }
-      options.push(opt);
-      continue;
-    }
+  return values;
+}
 
-    saveCurrent();
-    
-    currentQuestion = line.replace(/^\\d+\\.[\\s\\t]*/, '').trim();
-    if (currentQuestion.startsWith("'") || currentQuestion.startsWith('"') || currentQuestion.startsWith('“')) {
-      currentQuestion = currentQuestion.substring(1).trim();
-    }
-    options = [];
-    correctIndex = 0;
+const env = { ...loadEnv(path.join(__dirname, ".env.local")), ...process.env };
+if (!env.NEXT_PUBLIC_SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY) {
+  throw new Error("NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required.");
+}
+
+const sourcePath = path.resolve(__dirname, "hindi-literature-mcq-seed-final.json");
+const source = JSON.parse(fs.readFileSync(sourcePath, "utf8"));
+const restUrl = `${env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1`;
+
+async function request(endpoint, options = {}) {
+  const response = await fetch(`${restUrl}/${endpoint}`, {
+    ...options,
+    headers: {
+      apikey: env.SUPABASE_SERVICE_ROLE_KEY,
+      Authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`,
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  });
+  if (!response.ok) throw new Error(await response.text());
+  const text = await response.text();
+  return text ? JSON.parse(text) : null;
+}
+
+function validateSeed(seed) {
+  if (!Array.isArray(seed.questions) || seed.questions.length !== seed.totalQuestions) {
+    throw new Error("The seed question count does not match totalQuestions.");
   }
-  
-  saveCurrent();
+  const ids = new Set();
+  const questions = seed.questions.map((question, position) => {
+    if (!Number.isInteger(question.id) || ids.has(question.id)) throw new Error(`Invalid or duplicate question id: ${question.id}`);
+    ids.add(question.id);
+    if (typeof question.question !== "string" || !question.question.trim()) throw new Error(`Question ${question.id} has no text.`);
+    if (!Array.isArray(question.options) || question.options.length < 2 || question.options.length > 6) throw new Error(`Question ${question.id} must have 2–6 options.`);
+    const correct = question.options.filter((option) => option.isCorrect);
+    if (correct.length !== 1 || correct[0].id !== question.correctAnswer || correct[0].text !== question.correctAnswerText) {
+      throw new Error(`Question ${question.id} has an inconsistent answer key.`);
+    }
+    return {
+      question_hi: question.question.trim(),
+      question_en: question.question.trim(),
+      options: question.options.map((option) => option.text.trim()),
+      correct_index: question.options.findIndex((option) => option.isCorrect),
+      position,
+    };
+  });
   return questions;
 }
 
-const slug = (value) => value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 80);
-
 async function seed() {
-  const parsedQuestions = parseQuiz(rawText);
-  console.log('Parsed ' + parsedQuestions.length + ' questions.');
-  
-  if (parsedQuestions.length === 0) return;
+  const parsedQuestions = validateSeed(source);
+  const existing = await request("admin_quiz_questions?select=question_hi&limit=1000");
+  const sourceQuestions = new Set(parsedQuestions.map((question) => question.question_hi));
+  if (existing.some((question) => sourceQuestions.has(question.question_hi))) {
+    throw new Error("This Hindi literature quiz (or part of it) is already seeded.");
+  }
 
-  const titleHi = 'साहित्यिक प्रश्नोत्तरी (79 Questions)';
-  const titleEn = 'Literary Quiz 79';
-  const quizId = 'literary-quiz-79-' + Date.now().toString(36);
-  
-  const quizRow = {
+  const quizId = `hindi-literature-mcq-${Date.now().toString(36)}`;
+  const quiz = {
     id: quizId,
-    title_en: titleEn,
-    title_hi: titleHi,
-    status: 'published'
+    title_hi: "हिंदी साहित्य बहुविकल्पीय प्रश्नोत्तरी",
+    title_en: "Hindi Literature MCQ Quiz",
+    status: "published",
   };
-  
-  const questionsRows = parsedQuestions.map((q, idx) => ({
-    id: `${quizId}-${idx + 1}`,
+  const questions = parsedQuestions.map((question, index) => ({
+    ...question,
+    id: `${quizId}-${index + 1}`,
     quiz_id: quizId,
-    question_hi: q.question_hi,
-    question_en: q.question_en,
-    options: q.options,
-    correct_index: q.correct_index,
-    position: idx
   }));
-  
-  const { error: quizError } = await supabase.from('admin_quizzes').insert(quizRow);
-  if (quizError) {
-    console.error('Failed to insert quiz:', quizError);
-    return;
+
+  await request("admin_quizzes", { method: "POST", body: JSON.stringify(quiz), headers: { Prefer: "return=minimal" } });
+  try {
+    await request("admin_quiz_questions", { method: "POST", body: JSON.stringify(questions), headers: { Prefer: "return=minimal" } });
+  } catch (error) {
+    await request(`admin_quizzes?id=eq.${encodeURIComponent(quizId)}`, { method: "DELETE", headers: { Prefer: "return=minimal" } });
+    throw error;
   }
-  
-  const { error: qError } = await supabase.from('admin_quiz_questions').insert(questionsRows);
-  if (qError) {
-    console.error('Failed to insert questions:', qError);
-    await supabase.from('admin_quizzes').delete().eq('id', quizId);
-    return;
-  }
-  
-  console.log('Successfully seeded quiz with ' + questionsRows.length + ' questions!');
-  console.log('Quiz ID:', quizId);
+  console.log(`Seeded ${questions.length} Hindi literature questions (quiz: ${quizId}).`);
 }
 
-seed().catch(console.error);
+seed().catch((error) => {
+  console.error(error.message || error);
+  process.exitCode = 1;
+});
