@@ -10,7 +10,11 @@ export async function POST(request: Request) {
     const body = await request.json();
     const res = await fetch(`${BASE_URL}/otp/verify`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { 
+        "Content-Type": "application/json",
+        "User-Agent": request.headers.get("user-agent") || "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+        "Accept": "application/json"
+      },
       body: JSON.stringify(body),
     });
 
