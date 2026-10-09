@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { createAdminClient } from "@/lib/server/supabase";
+import { createClient } from "@supabase/supabase-js";
 
 const BASE_URL = "https://backend.rajkamalprakashan.com/api/v1/auth";
 
@@ -13,10 +15,35 @@ export async function POST(request: Request) {
 
     const data = await res.json().catch(() => ({}));
 
-    // NOTE: If this endpoint returns an auth token, you may want to set it as a cookie here.
-    // e.g. response.cookies.set("access_token", data.token, { httpOnly: true, secure: true })
+    if (res.ok && body.email && body.password) {
+      const sbClient = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!);
+      let sbRes = await sbClient.auth.signInWithPassword({ email: body.email, password: body.password });
 
-    return NextResponse.json(data, { status: res.status });
+      if (sbRes.error) {
+        const admin = createAdminClient();
+        const { data: profile } = await admin.from("reader_profiles").select("id").eq("email", body.email).single();
+        if (profile?.id) {
+           await admin.auth.admin.updateUserById(profile.id, { password: body.password });
+           sbRes = await sbClient.auth.signInWithPassword({ email: body.email, password: body.password });
+        } else {
+           const createRes = await admin.auth.admin.createUser({ email: body.email, password: body.password, email_confirm: true });
+           if (!createRes.error) {
+              sbRes = await sbClient.auth.signInWithPassword({ email: body.email, password: body.password });
+           }
+        }
+      }
+      
+      if (sbRes.data?.session) {
+        data.supabaseSession = sbRes.data.session;
+      }
+    }
+
+    const response = NextResponse.json(data, { status: res.status });
+    const setCookies = res.headers.getSetCookie?.() || [];
+    for (const cookie of setCookies) {
+      response.headers.append("Set-Cookie", cookie);
+    }
+    return response;
   } catch (error) {
     return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
   }
